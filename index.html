@@ -228,6 +228,16 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
 .inline-add-trigger:hover{background:var(--surface-2); color:var(--text);}
 
 /* ---------- Overview hero (streak heatmap) ---------- */
+/* ---------- Up next (Subjective-style countdown to the next/current period) ---------- */
+.upnext-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px 22px; margin-bottom:18px; box-shadow:var(--shadow);}
+.upnext-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:6px;}
+.upnext-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint);}
+.upnext-timer{font-family:var(--mono); font-size:19px; font-weight:600; color:var(--accent); white-space:nowrap;}
+.upnext-name{font-size:18px; font-weight:700; letter-spacing:-.01em; margin-bottom:2px;}
+.upnext-meta{font-size:13px; color:var(--text-dim); margin-bottom:12px;}
+.upnext-track{height:6px; background:var(--surface-2); border-radius:99px; overflow:hidden;}
+.upnext-fill{height:100%; border-radius:99px; width:0%; background:var(--accent); transition:width 1s linear;}
+@media (prefers-reduced-motion: reduce){ .upnext-fill{transition:none;} }
 .overview-hero-row{display:grid; grid-template-columns:1.7fr 1fr; gap:16px; margin-bottom:18px; align-items:stretch; min-width:0;}
 .hero-side-col{display:flex; flex-direction:column; gap:16px; min-width:0;}
 .hero-heat-card{background:var(--accent-soft); border-radius:var(--radius); padding:22px 24px; display:flex; flex-direction:column; min-width:0;}
@@ -414,6 +424,15 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
     <section class="tab active" id="tab-overview">
       <div class="topbar">
         <div><h1 id="ovGreeting">Overview</h1><div class="sub" id="ovDate"></div></div>
+      </div>
+      <div class="upnext-card" id="upNextCard" style="display:none;">
+        <div class="upnext-head">
+          <span class="upnext-label" id="upNextLabel">Up next</span>
+          <span class="upnext-timer" id="upNextTimer"></span>
+        </div>
+        <div class="upnext-name" id="upNextName"></div>
+        <div class="upnext-meta" id="upNextMeta"></div>
+        <div class="upnext-track"><div class="upnext-fill" id="upNextFill"></div></div>
       </div>
       <div class="overview-hero-row">
         <div class="hero-heat-card">
@@ -1383,6 +1402,49 @@ document.getElementById("themeToggle").addEventListener("click", ()=>{
 });
 
 /* ===================== OVERVIEW ===================== */
+// Subjective-style "up next" strip: live countdown to the current period's end,
+// or the next period's start, with a bar that fills as the moment approaches.
+function renderUpNext(){
+  const card = document.getElementById("upNextCard");
+  const now = new Date();
+  const dayIdx = mondayIndex(now);
+  if(dayIdx>4){ card.style.display="none"; return; }
+  const nowMin = now.getHours()*60 + now.getMinutes() + now.getSeconds()/60;
+  const periods = state.timetable.filter(p=>p.day===dayIdx).sort((a,b)=>timeToMin(a.start)-timeToMin(b.start));
+  const current = periods.find(p=> nowMin>=timeToMin(p.start) && nowMin<timeToMin(p.end));
+  const next = periods.find(p=> timeToMin(p.start) > nowMin);
+  if(!current && !next){ card.style.display="none"; return; }
+  card.style.display="block";
+
+  let period, label, targetMin, fill;
+  if(current){
+    period = current; label = "In progress";
+    const totalMin = timeToMin(current.end)-timeToMin(current.start);
+    const elapsedMin = nowMin-timeToMin(current.start);
+    fill = totalMin>0 ? Math.min(100, Math.max(0, elapsedMin/totalMin*100)) : 100;
+    targetMin = timeToMin(current.end);
+  } else {
+    period = next; label = "Up next";
+    const untilMin = timeToMin(next.start) - nowMin;
+    const runway = 60; // only start filling within the final hour, so a long gap (e.g. lunch) doesn't just read as "empty and stuck"
+    fill = untilMin>=runway ? 0 : Math.min(100, Math.max(0, (runway-untilMin)/runway*100));
+    targetMin = timeToMin(next.start);
+  }
+  const remainingSec = Math.max(0, Math.round((targetMin - nowMin)*60));
+  const h=Math.floor(remainingSec/3600), m=Math.floor((remainingSec%3600)/60), s=remainingSec%60;
+  const timeStr = h>0 ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}` : `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+
+  const subj = subjectById(period.subjectId);
+  const color = subj?subj.color:"var(--accent)";
+  document.getElementById("upNextLabel").textContent = label;
+  document.getElementById("upNextTimer").textContent = (current?"Ends in ":"Starts in ")+timeStr;
+  document.getElementById("upNextTimer").style.color = color;
+  document.getElementById("upNextName").textContent = subj?subj.name:(period.label||"Untitled");
+  document.getElementById("upNextName").style.color = color;
+  document.getElementById("upNextMeta").textContent = [period.room, period.teacher].filter(Boolean).join(" · ") || " ";
+  document.getElementById("upNextFill").style.width = fill.toFixed(1)+"%";
+  document.getElementById("upNextFill").style.background = color;
+}
 function renderOverview(){
   const now = new Date();
   document.getElementById("ovDate").textContent = now.toLocaleDateString(undefined,{weekday:"long", month:"long", day:"numeric"});
@@ -1392,6 +1454,7 @@ function renderOverview(){
   document.getElementById("statStreak").textContent = computeStreak();
   document.getElementById("statMinutesToday").textContent = minutesOnDate(todayISO());
   document.getElementById("statPomosToday").textContent = state.sessions.filter(s=>s.date===todayISO()).length;
+  renderUpNext();
   renderHeroHeatmap();
   renderSubjectBalance();
   const doneToday = allTasks().filter(t=>taskCompletedOnDate(t, todayISO())).length;
@@ -2501,6 +2564,9 @@ function init(){
     if(document.getElementById("tab-timetable").classList.contains("active")) renderTimetable();
     if(document.getElementById("tab-overview").classList.contains("active")) renderOverview();
   }, 30000);
+  setInterval(()=>{
+    if(document.getElementById("tab-overview").classList.contains("active")) renderUpNext();
+  }, 1000);
 }
 init();
 
