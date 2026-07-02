@@ -91,7 +91,7 @@ h1,h2,h3,p{margin:0;}
 .theme-btn{display:flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border); background:transparent; font-size:13px; font-weight:500; cursor:pointer;}
 .theme-btn:hover{background:var(--surface-2);}
 
-@media (max-width:820px){
+@media (max-width:820px) and (min-width:701px){
   .app{flex-direction:column;}
   .sidebar{
     width:100%; height:auto; position:sticky; top:0; padding:12px 14px;
@@ -106,9 +106,30 @@ h1,h2,h3,p{margin:0;}
   .theme-btn{padding:6px 8px; font-size:11.5px; white-space:nowrap;}
 }
 
+/* ---------- Bottom nav (phone-width only — replaces the sidebar entirely) ---------- */
+.bottom-nav{display:none;}
+@media (max-width:700px){
+  .app{flex-direction:column;}
+  .sidebar{display:none;}
+  .bottom-nav{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:150;
+    background:var(--surface); border-top:1px solid var(--border);
+    padding:6px 2px calc(6px + env(safe-area-inset-bottom));
+  }
+  .bn-item{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    min-height:50px; padding:4px 2px; border:none; background:transparent; color:var(--text-dim);
+    font-size:10.5px; font-weight:500; border-radius:10px; cursor:pointer;
+  }
+  .bn-item svg{width:22px; height:22px;}
+  .bn-item.active{color:var(--accent);}
+  .bn-item:active{background:var(--surface-2);}
+}
+
 /* ---------- Main ---------- */
 .main{flex:1; min-width:0; padding:26px 36px 70px; max-width:1180px;}
-@media (max-width:820px){ .main{padding:20px 16px 50px;} }
+@media (max-width:820px) and (min-width:701px){ .main{padding:20px 16px 50px;} }
+@media (max-width:700px){ .main{padding:16px 14px calc(84px + env(safe-area-inset-bottom));} }
 .topbar{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:10px;}
 .topbar h1{font-size:22px; font-weight:800; letter-spacing:-.02em;}
 .topbar .sub{color:var(--text-dim); font-size:13.5px; margin-top:3px;}
@@ -123,7 +144,7 @@ h1,h2,h3,p{margin:0;}
 .cols-2{grid-template-columns:1fr 1fr;}
 .cols-3{grid-template-columns:repeat(3,1fr);}
 .cols-4{grid-template-columns:repeat(4,1fr);}
-@media (max-width:900px){.cols-2,.cols-3,.cols-4,.overview-hero-row{grid-template-columns:1fr;}}
+@media (max-width:900px){.cols-2,.cols-3,.cols-4{grid-template-columns:minmax(0,1fr);}}
 .section-title{font-size:14px; font-weight:700; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between;}
 .stat-card{display:flex; flex-direction:column; gap:4px;}
 .stat-num{font-family:var(--mono); font-size:26px; font-weight:600;}
@@ -207,14 +228,18 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
 .inline-add-trigger:hover{background:var(--surface-2); color:var(--text);}
 
 /* ---------- Overview hero (streak heatmap) ---------- */
-.overview-hero-row{display:grid; grid-template-columns:1.7fr 1fr; gap:16px; margin-bottom:18px; align-items:stretch;}
-.hero-side-col{display:flex; flex-direction:column; gap:16px;}
-.hero-heat-card{background:var(--accent-soft); border-radius:var(--radius); padding:22px 24px; display:flex; flex-direction:column;}
+.overview-hero-row{display:grid; grid-template-columns:1.7fr 1fr; gap:16px; margin-bottom:18px; align-items:stretch; min-width:0;}
+.hero-side-col{display:flex; flex-direction:column; gap:16px; min-width:0;}
+.hero-heat-card{background:var(--accent-soft); border-radius:var(--radius); padding:22px 24px; display:flex; flex-direction:column; min-width:0;}
 .hero-heat-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:16px;}
 .hero-heat-streak{font-family:var(--mono); font-size:22px; font-weight:600; color:var(--accent);}
 .hero-heat-streak span{font-size:26px;}
-.hero-heat-card .heat-grid{grid-template-rows:repeat(7,9px); gap:2px; margin:auto 0;}
+.hero-heat-card .heat-grid{grid-template-rows:repeat(7,9px); gap:2px; margin:auto 0; min-width:0; overflow-x:auto;}
 .hero-heat-card .heat-cell{width:9px; height:9px; border-radius:2px;}
+@media (max-width:900px){
+  .overview-hero-row{grid-template-columns:minmax(0,1fr);}
+  .hero-heat-head{flex-direction:column; align-items:flex-start; gap:4px;}
+}
 
 /* ---------- Overview ---------- */
 .period-row{display:flex; align-items:center; gap:12px; padding:10px 8px; border-radius:var(--radius-sm);}
@@ -253,6 +278,17 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
 .tt-col:hover .tt-add-col-btn{opacity:1;}
 .tt-legend{display:flex; flex-wrap:wrap; gap:14px; margin-top:14px;}
 .tt-legend span{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim);}
+.tt-mobile{display:none;}
+.tt-day-card{position:relative; background:var(--surface); border:1px solid var(--border); border-left:4px solid; border-radius:var(--radius); padding:12px 14px; margin-bottom:10px; cursor:pointer;}
+.tt-day-card.now{box-shadow:0 0 0 2px var(--accent);}
+.tt-day-card-time{font-family:var(--mono); font-size:12px; color:var(--text-dim); margin-bottom:2px;}
+.tt-day-card-name{font-weight:700; font-size:15.5px;}
+.tt-day-card-meta{font-size:12.5px; color:var(--text-dim); margin-top:2px;}
+.tt-day-card .now-tag{position:absolute; top:12px; right:14px;}
+@media (max-width:700px){
+  .tt-wrap, .tt-legend{display:none;}
+  .tt-mobile{display:block;}
+}
 
 /* ---------- Pomodoro / Stopwatch ---------- */
 .pomo-wrap{display:flex; gap:24px; flex-wrap:wrap;}
@@ -367,6 +403,8 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
     </div>
   </aside>
 
+  <nav class="bottom-nav" id="bottomNav"></nav>
+
   <main class="main">
     <!-- OVERVIEW -->
     <section class="tab active" id="tab-overview">
@@ -427,6 +465,11 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
       <div class="tt-toolbar"></div>
       <div class="tt-wrap"><div id="ttGrid"></div></div>
       <div class="tt-legend" id="ttLegend"></div>
+      <div class="tt-mobile" id="ttMobileWrap">
+        <div class="filter-tabs" id="ttDayTabs"></div>
+        <div id="ttDayList"></div>
+        <button class="btn" id="ttMobileAddBtn" style="width:100%; margin-top:6px;">+ Add period</button>
+      </div>
     </section>
 
     <!-- POMODORO / STOPWATCH -->
@@ -678,13 +721,18 @@ function toast(msg){
 let activePopover = null;
 function closePopover(){
   if(!activePopover) return;
-  activePopover.el.remove();
-  document.removeEventListener("mousedown", activePopover.outside, true);
   document.removeEventListener("keydown", activePopover.esc);
+  if(activePopover.outside) document.removeEventListener("mousedown", activePopover.outside, true);
+  activePopover.close();
   activePopover = null;
 }
+// On phone-width viewports, small fixed-width popovers anchored to a button don't work —
+// they become a full-screen-sized panel in an awkward spot. Use a bottom sheet instead,
+// same content, native-feeling slide-up interaction.
 function openPopover(anchor, title, bodyHtml, onMount){
   closePopover();
+  if(isMobileViewport()) return openPopoverSheet(title, bodyHtml, onMount);
+
   const pop = document.createElement("div");
   pop.className = "popover";
   pop.innerHTML = `${title?`<h3>${title}</h3>`:""}<div class="popover-body">${bodyHtml}</div>`;
@@ -716,10 +764,28 @@ function openPopover(anchor, title, bodyHtml, onMount){
   const esc = e=>{ if(e.key==="Escape") closePopover(); };
   setTimeout(()=> document.addEventListener("mousedown", outside, true), 0);
   document.addEventListener("keydown", esc);
-  activePopover = { el: pop, outside, esc };
+  activePopover = { el: pop, outside, esc, close(){ pop.remove(); } };
 
   if(onMount) onMount(pop.querySelector(".popover-body"));
   return pop;
+}
+function openPopoverSheet(title, bodyHtml, onMount){
+  const overlay = document.createElement("div");
+  overlay.className = "sheet-overlay";
+  overlay.innerHTML = `<div class="sheet"><div class="sheet-handle"></div>${title?`<h3 style="padding:0 8px 12px; font-size:16px; font-weight:700;">${title}</h3>`:""}<div class="popover-body" style="padding:0 4px;"></div></div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector(".popover-body").innerHTML = bodyHtml;
+  requestAnimationFrame(()=> overlay.classList.add("open"));
+  const outside = e=>{ if(e.target===overlay) closePopover(); };
+  overlay.addEventListener("mousedown", outside);
+  const esc = e=>{ if(e.key==="Escape") closePopover(); };
+  document.addEventListener("keydown", esc);
+  activePopover = { el: overlay, outside:null, esc, close(){
+    overlay.classList.remove("open");
+    setTimeout(()=> overlay.remove(), 220);
+  }};
+  if(onMount) onMount(overlay.querySelector(".popover-body"));
+  return overlay;
 }
 function promptPopover(anchor, title, opts, onSave){
   opts = opts || {};
@@ -744,7 +810,8 @@ function promptPopover(anchor, title, opts, onSave){
 }
 
 /* ===================== custom select (replaces native <select>) ===================== */
-function isMobileViewport(){ return window.innerWidth < 640; }
+const PHONE_BREAKPOINT = 700;
+function isMobileViewport(){ return window.innerWidth < PHONE_BREAKPOINT; }
 let activeCselDropdown = null;
 function closeCselDropdown(){
   if(!activeCselDropdown) return;
@@ -1157,10 +1224,31 @@ function renderNav(){
   const nav = document.getElementById("navList");
   nav.innerHTML = TABS.map(t=>`<button class="navitem" data-tab="${t.id}">${icon(t.icon)}<span>${t.label}</span></button>`).join("");
   nav.querySelectorAll(".navitem").forEach(b=> b.addEventListener("click", ()=> switchTab(b.dataset.tab)));
+  renderBottomNav();
+}
+const BOTTOM_NAV_PRIMARY = ["overview","timetable","pomodoro","checklist"];
+const MORE_ICON = '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>';
+function renderBottomNav(){
+  const nav = document.getElementById("bottomNav");
+  const primary = BOTTOM_NAV_PRIMARY.map(id=> TABS.find(t=>t.id===id));
+  nav.innerHTML = primary.map(t=>`<button class="bn-item" data-bn-tab="${t.id}">${icon(t.icon)}<span>${t.label}</span></button>`).join("")
+    + `<button class="bn-item" id="bnMoreBtn">${icon(MORE_ICON)}<span>More</span></button>`;
+  nav.querySelectorAll("[data-bn-tab]").forEach(b=> b.addEventListener("click", ()=> switchTab(b.dataset.bnTab)));
+  nav.querySelector("#bnMoreBtn").addEventListener("click", openMoreSheet);
+}
+function openMoreSheet(){
+  const items = ["marks","analytics","settings"].map(id=> TABS.find(t=>t.id===id));
+  const body = items.map(t=>`<button class="sheet-option" data-more-tab="${t.id}" style="display:flex; align-items:center; gap:12px;">${icon(t.icon,18)}<span>${t.label}</span></button>`).join("");
+  openPopoverSheet("More", body, root=>{
+    root.querySelectorAll("[data-more-tab]").forEach(b=> b.addEventListener("click", ()=>{ closePopover(); switchTab(b.dataset.moreTab); }));
+  });
 }
 function switchTab(id){
   document.querySelectorAll(".tab").forEach(el=> el.classList.toggle("active", el.id === "tab-"+id));
   document.querySelectorAll(".navitem").forEach(el=> el.classList.toggle("active", el.dataset.tab === id));
+  document.querySelectorAll("#bottomNav [data-bn-tab]").forEach(el=> el.classList.toggle("active", el.dataset.bnTab === id));
+  const moreBtn = document.getElementById("bnMoreBtn");
+  if(moreBtn) moreBtn.classList.toggle("active", !BOTTOM_NAV_PRIMARY.includes(id));
   state.settings.lastTab = id; save();
   renderStreakChip();
   if(id==="overview") renderOverview();
@@ -1361,8 +1449,45 @@ function renderTimetable(){
 
   document.getElementById("ttLegend").innerHTML = state.subjects.map(s=>
     `<span><span class="dot" style="background:${s.color}"></span>${escapeHtml(s.name)}</span>`).join("");
+
+  renderTimetableMobile();
 }
 document.getElementById("ttAddBtn").addEventListener("click", (e)=> openPeriodModal(null, mondayIndex(new Date())<=4?mondayIndex(new Date()):0, e.currentTarget));
+
+// Phone-width viewers get a one-day-at-a-time agenda list instead of the 5-column
+// grid — a 5-column grid has no room to be legible at ~370px wide.
+let mobileTTDay = null;
+function renderTimetableMobile(){
+  const todayIdx = mondayIndex(new Date());
+  if(mobileTTDay===null) mobileTTDay = todayIdx<=4 ? todayIdx : 0;
+
+  document.getElementById("ttDayTabs").innerHTML = DAYS.map((d,i)=>
+    `<button class="${mobileTTDay===i?'active':''}" data-day-tab="${i}">${d}${i===todayIdx?' •':''}</button>`).join("");
+  document.getElementById("ttDayTabs").querySelectorAll("button").forEach(b=>
+    b.addEventListener("click", ()=>{ mobileTTDay = Number(b.dataset.dayTab); renderTimetableMobile(); }));
+
+  const periods = state.timetable.filter(p=>p.day===mobileTTDay).sort((a,b)=>timeToMin(a.start)-timeToMin(b.start));
+  const list = document.getElementById("ttDayList");
+  if(!periods.length){ list.innerHTML = `<div class="empty">No periods for ${DAYS[mobileTTDay]} yet.</div>`; }
+  else{
+    const now = new Date(); const nowMin = now.getHours()*60+now.getMinutes();
+    list.innerHTML = periods.map(p=>{
+      const subj = subjectById(p.subjectId);
+      const color = subj?subj.color:"#94a3b8";
+      const name = subj?subj.name:(p.label||"Untitled");
+      const active = mobileTTDay===todayIdx && nowMin>=timeToMin(p.start) && nowMin<timeToMin(p.end);
+      return `<div class="tt-day-card ${active?'now':''}" data-edit-period-m="${p.id}" style="border-left-color:${color};">
+        <div class="tt-day-card-time">${minToTimeLabel(timeToMin(p.start))} – ${minToTimeLabel(timeToMin(p.end))}</div>
+        <div class="tt-day-card-name">${escapeHtml(name)}</div>
+        ${(p.room||p.teacher)?`<div class="tt-day-card-meta">${[p.room,p.teacher].filter(Boolean).map(escapeHtml).join(" · ")}</div>`:""}
+        ${active?'<span class="now-tag">NOW</span>':''}
+      </div>`;
+    }).join("");
+    list.querySelectorAll("[data-edit-period-m]").forEach(el=>
+      el.addEventListener("click", ()=> openPeriodModal(el.dataset.editPeriodM, undefined, el)));
+  }
+  document.getElementById("ttMobileAddBtn").onclick = e=> openPeriodModal(null, mobileTTDay, e.currentTarget);
+}
 
 function openPeriodModal(periodId, prefillDay, anchor){
   const editing = periodId ? state.timetable.find(p=>p.id===periodId) : null;
