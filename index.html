@@ -1,0 +1,2014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Keystone</title>
+<meta name="theme-color" content="#F6F3EE">
+<meta name="description" content="Personal study dashboard — timetable, pomodoro, checklist, marks and analytics.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Keystone">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* ---- Warm Alabaster raw tokens ---- */
+  --wa-bg: rgb(246, 243, 238); --wa-surface: rgb(255, 253, 249); --wa-surface-2: rgb(241, 237, 229); --wa-surface-3: rgb(240, 235, 225);
+  --wa-border: rgb(229, 223, 211); --wa-text: rgb(43, 38, 32); --wa-text-dim: rgb(110, 102, 89); --wa-text-faint: rgb(168, 160, 146);
+  --wa-accent: rgb(46, 111, 64); --wa-accent-soft: rgb(228, 239, 230);
+  --wa-warn: rgb(148, 99, 0); --wa-warn-2: rgb(168, 126, 35); --wa-warn-soft: rgb(246, 238, 221);
+  --wa-danger: rgb(178, 58, 44); --wa-danger-soft: rgb(248, 231, 226);
+  --wa-success: var(--wa-accent); --wa-success-soft: var(--wa-accent-soft);
+  --wa-subj-1: rgb(184, 92, 56); --wa-subj-2: rgb(95, 138, 99); --wa-subj-3: rgb(168, 126, 35); --wa-subj-4: rgb(92, 122, 153); --wa-subj-5: rgb(126, 90, 117);
+  --wa-subj-6: rgb(63, 126, 116); --wa-subj-7: rgb(168, 70, 90);
+
+  --font-sans:'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --font-mono:'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --shadow-overlay: 0 12px 32px rgba(43, 38, 32, 0.16);
+
+  /* ---- semantic app aliases ---- */
+  --bg:var(--wa-bg); --surface:var(--wa-surface); --surface-2:var(--wa-surface-2); --border:var(--wa-border);
+  --text:var(--wa-text); --text-dim:var(--wa-text-dim); --text-faint:var(--wa-text-faint);
+  --accent:var(--wa-accent); --accent-2:var(--wa-accent); --accent-soft:var(--wa-accent-soft);
+  --success:var(--wa-success); --success-soft:var(--wa-success-soft); --danger:var(--wa-danger); --danger-soft:var(--wa-danger-soft);
+  --warn:var(--wa-warn); --warn-soft:var(--wa-warn-soft);
+  --radius-sm:8px; --radius:12px; --radius-lg:16px;
+  --shadow:inset 0 0 0 1px var(--wa-border);
+  --shadow-modal:var(--shadow-overlay);
+  --font:var(--font-sans);
+  --mono:var(--font-mono);
+}
+[data-theme="dark"]{
+  --wa-bg: rgb(23, 20, 16); --wa-surface: rgb(32, 28, 22); --wa-surface-2: rgb(38, 33, 27); --wa-surface-3: rgb(44, 38, 31);
+  --wa-border: rgb(58, 51, 42); --wa-text: rgb(240, 235, 225); --wa-text-dim: rgb(184, 174, 158); --wa-text-faint: rgb(120, 111, 98);
+  --wa-accent: rgb(143, 191, 155); --wa-accent-soft: rgb(41, 56, 44);
+  --wa-warn: rgb(216, 165, 84); --wa-warn-2: rgb(200, 152, 58); --wa-warn-soft: rgb(54, 45, 26);
+  --wa-danger: rgb(214, 122, 105); --wa-danger-soft: rgb(56, 32, 27);
+  --wa-success: var(--wa-accent); --wa-success-soft: var(--wa-accent-soft);
+
+  --bg:var(--wa-bg); --surface:var(--wa-surface); --surface-2:var(--wa-surface-2); --border:var(--wa-border);
+  --text:var(--wa-text); --text-dim:var(--wa-text-dim); --text-faint:var(--wa-text-faint);
+  --accent:var(--wa-accent); --accent-2:var(--wa-accent); --accent-soft:var(--wa-accent-soft);
+  --success:var(--wa-success); --success-soft:var(--wa-success-soft); --danger:var(--wa-danger); --danger-soft:var(--wa-danger-soft);
+  --warn:var(--wa-warn); --warn-soft:var(--wa-warn-soft);
+  --shadow:inset 0 0 0 1px var(--wa-border);
+  --shadow-modal:0 12px 32px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  font-family:var(--font); background:var(--bg); color:var(--text);
+  -webkit-font-smoothing:antialiased; transition:background .2s ease,color .2s ease;
+}
+button,input,select,textarea{font-family:inherit; color:inherit;}
+h1,h2,h3,p{margin:0;}
+.app{display:flex; min-height:100vh;}
+
+/* ---------- Sidebar ---------- */
+.sidebar{
+  width:224px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--border);
+  display:flex; flex-direction:column; padding:22px 14px; position:sticky; top:0; height:100vh; z-index:20;
+}
+.brand{display:flex; align-items:center; gap:10px; padding:4px 10px 22px;}
+.brand-name{font-weight:800; font-size:15px; letter-spacing:-.02em;}
+.nav{display:flex; flex-direction:column; gap:2px; flex:1;}
+.navitem{
+  display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:var(--radius-sm);
+  border:none; background:transparent; color:var(--text-dim); font-size:14px; font-weight:500;
+  cursor:pointer; text-align:left; width:100%;
+}
+.navitem svg{width:17px;height:17px;flex-shrink:0;}
+.navitem:hover{background:var(--surface-2); color:var(--text);}
+.navitem.active{background:var(--accent-soft); color:var(--accent);}
+.sidebar-foot{display:flex; flex-direction:column; gap:8px; padding-top:12px; border-top:1px solid var(--border); margin-top:10px;}
+.streak-chip{display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600; padding:8px 10px; border-radius:var(--radius-sm); background:var(--surface-2);}
+.theme-btn{display:flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border); background:transparent; font-size:13px; font-weight:500; cursor:pointer;}
+.theme-btn:hover{background:var(--surface-2);}
+
+@media (max-width:820px){
+  .app{flex-direction:column;}
+  .sidebar{
+    width:100%; height:auto; position:sticky; top:0; padding:12px 14px;
+    flex-direction:row; align-items:center; gap:14px;
+  }
+  .brand{padding:0; flex-shrink:0;}
+  .brand-name{display:none;}
+  .nav{flex-direction:row; overflow-x:auto; gap:4px; flex:1;}
+  .navitem{flex-direction:column; gap:3px; padding:6px 10px; font-size:10.5px; white-space:nowrap;}
+  .sidebar-foot{flex-direction:row; padding-top:0; border-top:none; margin-top:0; flex-shrink:0; gap:6px;}
+  .streak-chip{padding:6px 8px; font-size:12px; white-space:nowrap;}
+  .theme-btn{padding:6px 8px; font-size:11.5px; white-space:nowrap;}
+}
+
+/* ---------- Main ---------- */
+.main{flex:1; min-width:0; padding:26px 36px 70px; max-width:1180px;}
+@media (max-width:820px){ .main{padding:20px 16px 50px;} }
+.topbar{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:10px;}
+.topbar h1{font-size:22px; font-weight:800; letter-spacing:-.02em;}
+.topbar .sub{color:var(--text-dim); font-size:13.5px; margin-top:3px;}
+.tab{display:none;}
+.tab.active{display:block; animation:tabIn .18s ease;}
+@media (prefers-reduced-motion: reduce){ .tab.active{animation:none;} }
+@keyframes tabIn{ from{opacity:0; transform:translateY(3px);} to{opacity:1; transform:none;} }
+
+/* ---------- Generic components ---------- */
+.card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; box-shadow:var(--shadow);}
+.grid{display:grid; gap:16px;}
+.cols-2{grid-template-columns:1fr 1fr;}
+.cols-3{grid-template-columns:repeat(3,1fr);}
+.cols-4{grid-template-columns:repeat(4,1fr);}
+@media (max-width:900px){.cols-2,.cols-3,.cols-4,.overview-hero-row{grid-template-columns:1fr;}}
+.section-title{font-size:14px; font-weight:700; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between;}
+.stat-card{display:flex; flex-direction:column; gap:4px;}
+.stat-num{font-family:var(--mono); font-size:26px; font-weight:600;}
+.stat-label{color:var(--text-dim); font-size:12.5px; font-weight:500;}
+.btn{
+  display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:var(--radius-sm);
+  border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:13.5px; font-weight:600;
+  cursor:pointer; white-space:nowrap;
+}
+.btn:hover{background:var(--surface-2);}
+.btn-primary{background:var(--accent); border-color:var(--accent); color:#fff;}
+.btn-primary:hover{filter:brightness(1.07);}
+.btn-danger{color:var(--danger); border-color:var(--danger-soft);}
+.btn-danger:hover{background:var(--danger-soft);}
+.btn-sm{padding:5px 10px; font-size:12.5px;}
+.btn-icon{padding:6px; width:30px; height:30px; justify-content:center;}
+.input,select,textarea{
+  width:100%; padding:8px 11px; border-radius:var(--radius-sm); border:1px solid var(--border);
+  background:var(--bg); font-size:13.5px; outline:none;
+}
+.input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+label.field{display:flex; flex-direction:column; gap:5px; font-size:12.5px; font-weight:600; color:var(--text-dim); margin-bottom:12px;}
+.row{display:flex; gap:10px;}
+.row > *{flex:1;}
+.dot{width:9px; height:9px; border-radius:50%; flex-shrink:0; display:inline-block;}
+.badge{font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; display:inline-flex; align-items:center; gap:4px;}
+.badge-warn{background:var(--warn-soft); color:var(--warn);}
+.badge-danger{background:var(--danger-soft); color:var(--danger);}
+.badge-success{background:var(--success-soft); color:var(--success);}
+.badge-muted{background:var(--surface-2); color:var(--text-dim);}
+.badge-accent{background:var(--accent-soft); color:var(--accent);}
+.empty{color:var(--text-faint); font-size:13px; padding:20px 4px; text-align:center;}
+hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
+.iconbtn{background:transparent; border:none; cursor:pointer; color:var(--text-faint); padding:4px; border-radius:6px; display:flex;}
+.iconbtn:hover{color:var(--text); background:var(--surface-2);}
+.iconbtn svg{width:15px;height:15px;}
+
+/* ---------- Popover (replaces centered modal for period/mark/task forms) ---------- */
+.popover{position:fixed; z-index:200; width:320px; background:var(--surface); border-radius:var(--radius-lg); padding:18px; box-shadow:0 8px 24px rgba(43,38,32,.16), inset 0 0 0 1px var(--border);}
+.popover-arrow{position:absolute; width:11px; height:11px; background:var(--surface); border-left:1px solid var(--border); border-top:1px solid var(--border); transform:rotate(45deg);}
+.popover-arrow.arrow-top{top:-6px;}
+.popover-arrow.arrow-bottom{bottom:-6px; border-left:none; border-top:none; border-right:1px solid var(--border); border-bottom:1px solid var(--border);}
+.popover h3{font-size:14px; font-weight:700; margin-bottom:14px; color:var(--text);}
+.modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:6px;}
+
+/* ---------- Modal (reserved for surfaces that outgrow a popover, e.g. timetable import) ---------- */
+.modal-overlay{position:fixed; inset:0; background:rgba(43,38,32,.35); display:flex; align-items:center; justify-content:center; z-index:300; padding:20px;}
+.modal{background:var(--surface); border-radius:var(--radius-lg); padding:22px; width:640px; max-width:100%; max-height:88vh; overflow:auto; box-shadow:var(--shadow-modal);}
+.modal h3{font-size:16px; font-weight:700; margin-bottom:16px; color:var(--text);}
+.import-table{width:100%; border-collapse:collapse; font-size:12.5px; margin-top:6px;}
+.import-table th{text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); padding:6px 8px; border-bottom:1px solid var(--border);}
+.import-table td{padding:6px 8px; border-bottom:1px solid var(--border); vertical-align:middle;}
+.import-table tr.row-error td{color:var(--danger); opacity:.8; font-size:12px;}
+.radio-field{display:flex; align-items:center; gap:7px; font-size:13px; font-weight:500; color:var(--text-dim); cursor:pointer;}
+
+/* ---------- Inline add row (quick-add with no overlay at all) ---------- */
+.inline-add-row{display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:var(--radius-sm); background:var(--surface); box-shadow:inset 0 0 0 1.5px var(--accent);}
+.inline-add-row input{border:none; background:transparent; padding:0; box-shadow:none; flex:1; font-size:13.5px; outline:none; color:var(--text); font-family:var(--font);}
+.inline-add-trigger{display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:var(--radius-sm); cursor:pointer; font-size:13.5px; font-weight:500; color:var(--text-dim); border:1px dashed var(--border); background:transparent;}
+.inline-add-trigger:hover{background:var(--surface-2); color:var(--text);}
+
+/* ---------- Overview hero (streak heatmap) ---------- */
+.overview-hero-row{display:grid; grid-template-columns:1.7fr 1fr; gap:16px; margin-bottom:18px; align-items:stretch;}
+.hero-side-col{display:flex; flex-direction:column; gap:16px;}
+.hero-heat-card{background:var(--accent-soft); border-radius:var(--radius); padding:22px 24px; display:flex; flex-direction:column;}
+.hero-heat-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:16px;}
+.hero-heat-streak{font-family:var(--mono); font-size:22px; font-weight:600; color:var(--accent);}
+.hero-heat-streak span{font-size:26px;}
+.hero-heat-card .heat-grid{grid-template-rows:repeat(7,9px); gap:2px; margin:auto 0;}
+.hero-heat-card .heat-cell{width:9px; height:9px; border-radius:2px;}
+
+/* ---------- Overview ---------- */
+.period-row{display:flex; align-items:center; gap:12px; padding:10px 8px; border-radius:var(--radius-sm);}
+.period-row:hover{background:var(--surface-2);}
+.period-time{font-family:var(--mono); font-size:12px; color:var(--text-dim); width:88px; flex-shrink:0;}
+.period-bar{width:4px; align-self:stretch; border-radius:3px;}
+.period-name{font-weight:600; font-size:13.5px;}
+.period-meta{font-size:12px; color:var(--text-dim);}
+.now-tag{margin-left:auto; font-size:10.5px; font-weight:700; color:var(--accent); background:var(--accent-soft); padding:2px 7px; border-radius:999px;}
+.due-row{display:flex; align-items:center; gap:10px; padding:8px 4px;}
+.due-check{width:16px; height:16px; border-radius:5px; border:1.5px solid var(--border); flex-shrink:0; cursor:pointer;}
+.notes-area{width:100%; min-height:110px; resize:vertical; border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px; background:var(--bg); font-size:13px; font-family:var(--font);}
+
+/* ---------- Timetable ---------- */
+.tt-toolbar{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;}
+.tt-wrap{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow);}
+.tt-head{display:grid; grid-template-columns:52px repeat(5,1fr); border-bottom:1px solid var(--border);}
+.tt-head div{padding:10px 6px; font-size:12px; font-weight:700; text-align:center; color:var(--text-dim);}
+.tt-head div.today{color:var(--accent);}
+.tt-body{display:grid; grid-template-columns:52px repeat(5,1fr); position:relative;}
+.tt-hours{position:relative;}
+.tt-hour-label{position:absolute; right:8px; transform:translateY(-50%); font-size:10.5px; color:var(--text-faint); font-family:var(--mono);}
+.tt-col{position:relative; border-left:1px solid var(--border);}
+.tt-col.today{background:var(--surface-2);}
+.tt-hline{position:absolute; left:0; right:0; border-top:1px dashed var(--border);}
+.tt-block{position:absolute; left:3px; right:3px; border-radius:7px; padding:5px 7px; overflow:hidden; cursor:pointer; border-left:3px solid; font-size:11.5px; line-height:1.3;}
+.tt-block b{display:block; font-size:12px; font-weight:700; margin-bottom:1px;}
+.tt-now-line{position:absolute; left:0; right:0; height:0; border-top:2px solid var(--danger); z-index:5;}
+.tt-now-dot{position:absolute; left:-4px; top:-4px; width:8px; height:8px; border-radius:50%; background:var(--danger);}
+.tt-add-col-btn{position:absolute; bottom:8px; left:50%; transform:translateX(-50%); opacity:0; transition:opacity .15s;}
+.tt-col:hover .tt-add-col-btn{opacity:1;}
+.tt-legend{display:flex; flex-wrap:wrap; gap:14px; margin-top:14px;}
+.tt-legend span{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim);}
+
+/* ---------- Pomodoro / Stopwatch ---------- */
+.pomo-wrap{display:flex; gap:24px; flex-wrap:wrap;}
+.pomo-timer{display:flex; flex-direction:column; align-items:center; gap:18px; min-width:280px;}
+.pomo-ring{position:relative; width:220px; height:220px;}
+.pomo-ring svg{transform:rotate(-90deg);}
+.pomo-ring-label{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;}
+.pomo-time{font-family:var(--mono); font-size:38px; font-weight:600; letter-spacing:-1px;}
+.pomo-mode{font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-dim); margin-top:4px;}
+.pomo-controls{display:flex; gap:10px;}
+.pomo-controls .btn{padding:10px 20px;}
+.dur-row{display:flex; gap:8px; align-items:center; font-size:12px; color:var(--text-dim);}
+.dur-row input{width:52px; text-align:center; padding:5px;}
+.session-item{display:flex; align-items:center; gap:9px; padding:7px 2px; font-size:12.5px; border-bottom:1px solid var(--border);}
+.session-item:last-child{border-bottom:none;}
+.sw-hint{font-size:12px; color:var(--text-faint); text-align:center;}
+
+/* ---------- Checklist ---------- */
+.checklist-wrap{display:flex; gap:20px; align-items:flex-start;}
+.cat-sidebar{width:210px; flex-shrink:0; display:flex; flex-direction:column; gap:2px;}
+@media (max-width:820px){
+  .checklist-wrap{flex-direction:column;}
+  .cat-sidebar{width:100%; flex-direction:row; overflow-x:auto; gap:6px;}
+  .cat-item{flex-shrink:0;}
+}
+.cat-item{display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:var(--radius-sm); cursor:pointer; font-size:13.5px; font-weight:500; color:var(--text-dim);}
+.cat-item:hover{background:var(--surface-2);}
+.cat-item.active{background:var(--accent-soft); color:var(--accent); font-weight:600;}
+.cat-count{margin-left:auto; font-size:11px; color:var(--text-faint); font-family:var(--mono);}
+.filter-tabs{display:flex; gap:6px; margin-bottom:16px;}
+.filter-tabs button{padding:6px 13px; border-radius:999px; border:1px solid var(--border); background:var(--surface); font-size:12.5px; font-weight:600; cursor:pointer; color:var(--text-dim);}
+.filter-tabs button.active{background:var(--text); color:var(--bg); border-color:var(--text);}
+.group-block{margin-bottom:18px;}
+.group-head{font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); margin-bottom:6px; display:flex; align-items:center; justify-content:space-between;}
+.task-row{display:flex; align-items:center; gap:10px; padding:8px 4px; border-bottom:1px solid var(--border);}
+.task-row:last-child{border-bottom:none;}
+.task-check{width:18px; height:18px; border-radius:6px; border:1.6px solid var(--border); flex-shrink:0; cursor:pointer; display:flex; align-items:center; justify-content:center;}
+.task-check.done{background:var(--success); border-color:var(--success);}
+.task-check svg{width:11px;height:11px; color:#fff;}
+.task-title{flex:1; font-size:13.5px;}
+.task-title.done{color:var(--text-faint); text-decoration:line-through;}
+.pri-dot{width:7px; height:7px; border-radius:50%; flex-shrink:0;}
+.task-due{font-size:11px; padding:2px 7px; border-radius:999px; font-weight:600; flex-shrink:0;}
+.add-task-row{display:flex; gap:8px; margin-top:6px; position:relative;}
+.add-task-row input{flex:1; padding-right:110px;}
+.qa-hint{position:absolute; right:8px; top:50%; transform:translateY(-50%); display:flex; gap:5px; pointer-events:none;}
+.qa-hint .badge{font-size:10px; padding:2px 7px;}
+.progress-track{height:6px; background:var(--surface-2); border-radius:99px; overflow:hidden; margin-top:6px;}
+.progress-fill{height:100%; background:var(--accent); border-radius:99px;}
+
+/* ---------- Marks ---------- */
+.subj-avg-card{display:flex; align-items:center; gap:12px;}
+.marks-table{width:100%; border-collapse:collapse; font-size:13px;}
+.marks-table th{text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); padding:8px 10px; border-bottom:1px solid var(--border);}
+.marks-table td{padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:middle;}
+.marks-table tr:last-child td{border-bottom:none;}
+.next-assess-card{display:flex; align-items:center; gap:20px; margin-bottom:18px;}
+.next-assess-num{font-family:var(--mono); font-size:38px; font-weight:600; color:var(--accent); line-height:1;}
+.next-assess-unit{font-size:11.5px; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:.03em;}
+.mark-bar-row{display:flex; align-items:center; gap:14px; padding:12px 4px; border-bottom:1px solid var(--border); cursor:pointer; border-radius:var(--radius-sm);}
+.mark-bar-row:last-child{border-bottom:none;}
+.mark-bar-row:hover{background:var(--surface-2);}
+.mark-bar-name{width:130px; flex-shrink:0; font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;}
+.mark-bar-track{flex:1; height:16px; background:var(--surface-2); border-radius:5px; position:relative; overflow:visible;}
+.mark-bar-fill{height:100%; border-radius:5px;}
+.mark-bar-benchmark{position:absolute; top:-3px; width:2.5px; height:22px; background:var(--text); border-radius:2px;}
+.mark-bar-val{width:56px; text-align:right; flex-shrink:0; font-family:var(--mono); font-size:13px; font-weight:600;}
+.mark-bar-chevron{color:var(--text-faint); flex-shrink:0;}
+.subj-detail-head{display:flex; align-items:center; gap:12px; margin-bottom:18px;}
+.subj-back{display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--text-dim); cursor:pointer; padding:6px 4px;}
+.subj-back:hover{color:var(--text);}
+.benchmark-row{display:flex; align-items:center; gap:24px; flex-wrap:wrap;}
+.benchmark-stat{display:flex; flex-direction:column; gap:2px;}
+.benchmark-stat .v{font-family:var(--mono); font-size:22px; font-weight:600; color:var(--text);}
+.benchmark-stat .l{font-size:11.5px; color:var(--text-dim);}
+.benchmark-input-wrap{display:flex; align-items:center; gap:8px;}
+.benchmark-input-wrap input{width:70px;}
+
+/* ---------- Analytics ---------- */
+.heat-grid{display:grid; grid-auto-flow:column; grid-template-rows:repeat(7,11px); gap:3px; overflow-x:auto; padding-bottom:4px;}
+.heat-cell{width:11px; height:11px; border-radius:3px; background:var(--surface-2);}
+.chart-legend{display:flex; flex-wrap:wrap; gap:12px; margin-top:10px; font-size:11.5px; color:var(--text-dim);}
+.chart-legend span{display:flex; align-items:center; gap:5px;}
+
+/* ---------- Settings ---------- */
+.subj-row{display:flex; align-items:center; gap:10px; padding:8px 2px; border-bottom:1px solid var(--border);}
+.subj-row:last-child{border-bottom:none;}
+.color-input{width:30px; height:30px; border-radius:8px; border:1px solid var(--border); padding:0; cursor:pointer; background:none;}
+.goal-row{display:flex; align-items:center; gap:10px; padding:7px 2px;}
+.goal-row .input{width:70px;}
+.danger-zone{border-color:var(--danger-soft);}
+
+::-webkit-scrollbar{width:9px; height:9px;}
+::-webkit-scrollbar-thumb{background:var(--border); border-radius:99px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 64 64" style="flex-shrink:0;">
+        <circle cx="32" cy="32" r="26" fill="none" stroke="var(--border)" stroke-width="8"/>
+        <circle cx="32" cy="32" r="26" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round" stroke-dasharray="163" stroke-dashoffset="55" transform="rotate(-90 32 32)"/>
+        <path d="M23 33l6 6 12-13" fill="none" stroke="var(--accent)" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="brand-name">Keystone</div>
+    </div>
+    <nav class="nav" id="navList"></nav>
+    <div class="sidebar-foot">
+      <div class="streak-chip" id="streakChip"></div>
+      <button class="theme-btn" id="themeToggle">Toggle theme</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- OVERVIEW -->
+    <section class="tab active" id="tab-overview">
+      <div class="topbar">
+        <div><h1 id="ovGreeting">Overview</h1><div class="sub" id="ovDate"></div></div>
+      </div>
+      <div class="overview-hero-row">
+        <div class="hero-heat-card">
+          <div class="hero-heat-head">
+            <div class="section-title" style="margin-bottom:0;">365-day activity</div>
+            <div class="hero-heat-streak"><span id="heroStreakNum">0</span> day streak</div>
+          </div>
+          <div class="heat-grid" id="heroHeatGrid"></div>
+        </div>
+        <div class="hero-side-col">
+          <div class="card">
+            <div class="grid cols-2" style="gap:16px;">
+              <div class="stat-card"><div class="stat-num" id="statStreak">0</div><div class="stat-label">Day streak</div></div>
+              <div class="stat-card"><div class="stat-num" id="statMinutesToday">0</div><div class="stat-label">Min today</div></div>
+              <div class="stat-card"><div class="stat-num" id="statPomosToday">0</div><div class="stat-label">Pomodoros</div></div>
+              <div class="stat-card"><div class="stat-num" id="statTasksToday">0</div><div class="stat-label">Tasks done</div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="section-title">Subject balance</div>
+            <div id="ovSubjectBalance"></div>
+          </div>
+        </div>
+      </div>
+      <div class="grid cols-2">
+        <div class="card">
+          <div class="section-title">Today's classes</div>
+          <div id="ovToday"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">Due soon</div>
+          <div id="ovDue"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">Upcoming assessments</div>
+          <div id="ovAssess"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">Quick notes</div>
+          <textarea class="notes-area" id="ovNotes" placeholder="Jot something down..."></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- TIMETABLE -->
+    <section class="tab" id="tab-timetable">
+      <div class="topbar"><div><h1>Timetable</h1><div class="sub">Your weekly lesson periods</div></div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" id="ttImportBtn">Import</button>
+          <button class="btn btn-primary" id="ttAddBtn">+ Add period</button>
+        </div>
+      </div>
+      <div class="tt-toolbar"></div>
+      <div class="tt-wrap"><div id="ttGrid"></div></div>
+      <div class="tt-legend" id="ttLegend"></div>
+    </section>
+
+    <!-- POMODORO / STOPWATCH -->
+    <section class="tab" id="tab-pomodoro">
+      <div class="topbar"><div><h1>Pomodoro</h1><div class="sub">Stay focused, one block at a time</div></div></div>
+      <div class="pomo-wrap">
+        <div class="card pomo-timer">
+          <div class="filter-tabs" id="timerModeTabs" style="margin-bottom:0;"></div>
+          <select class="input" id="pomoSubject" style="max-width:220px;"></select>
+          <div class="pomo-ring">
+            <svg width="220" height="220" viewBox="0 0 220 220">
+              <circle cx="110" cy="110" r="100" fill="none" stroke="var(--border)" stroke-width="10"/>
+              <circle cx="110" cy="110" r="100" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" id="pomoProgress" stroke-dasharray="628" stroke-dashoffset="0"/>
+            </svg>
+            <div class="pomo-ring-label"><div class="pomo-time" id="pomoTime">25:00</div><div class="pomo-mode" id="pomoMode">Focus</div></div>
+          </div>
+          <div class="pomo-controls" id="pomoControls"></div>
+          <div class="row" id="durRow" style="gap:14px;">
+            <div class="dur-row">Focus <input class="input" type="number" min="1" max="120" id="durWork"></div>
+            <div class="dur-row">Short <input class="input" type="number" min="1" max="60" id="durShort"></div>
+            <div class="dur-row">Long <input class="input" type="number" min="1" max="60" id="durLong"></div>
+          </div>
+          <div class="sw-hint" id="swHint" style="display:none;">Sessions log automatically when you stop the timer.</div>
+        </div>
+        <div class="card" style="flex:1; min-width:260px;">
+          <div class="section-title">Today's sessions <span id="pomoTodayTotal" class="badge badge-muted"></span></div>
+          <div id="pomoSessions"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CHECKLIST -->
+    <section class="tab" id="tab-checklist">
+      <div class="topbar"><div><h1>Checklist</h1><div class="sub">Categories, sections, tasks — Todoist style</div></div>
+      </div>
+      <div class="filter-tabs" id="checklistFilters"></div>
+      <div class="checklist-wrap">
+        <div class="cat-sidebar" id="catSidebar"></div>
+        <div class="card" style="flex:1; min-width:0;" id="checklistMain"></div>
+      </div>
+    </section>
+
+    <!-- MARKS -->
+    <section class="tab" id="tab-marks">
+      <div class="topbar"><div><h1>Marks</h1><div class="sub">Track results and benchmarks, by year</div></div>
+        <button class="btn btn-primary" id="markAddBtn">+ Add mark</button>
+      </div>
+      <div class="filter-tabs" id="yearTabs"></div>
+      <div id="nextAssessCard"></div>
+      <div class="grid cols-4" id="markSummary" style="margin-bottom:18px;"></div>
+      <div id="marksBody"></div>
+    </section>
+
+    <!-- ANALYTICS -->
+    <section class="tab" id="tab-analytics">
+      <div class="topbar"><div><h1>Analytics</h1><div class="sub">Study time, marks, streaks and goals</div></div></div>
+      <div class="grid cols-2">
+        <div class="card">
+          <div class="section-title">Study time — last 7 days</div>
+          <div id="chartWeek"></div>
+          <div class="chart-legend" id="chartWeekLegend"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">Weekly goals</div>
+          <div id="goalProgress"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">Mark trend
+            <select class="input" id="trendSubject" style="width:auto; padding:4px 8px; font-size:12px;"></select>
+          </div>
+          <div id="chartTrend"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">Task completion</div>
+          <div id="taskDonut" style="display:flex; align-items:center; gap:18px;"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <div class="section-title">Activity streak</div>
+        <div class="heat-grid" id="heatGrid"></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="tab" id="tab-settings">
+      <div class="topbar"><div><h1>Settings</h1><div class="sub">Subjects, goals, appearance, data</div></div></div>
+      <div class="grid cols-2">
+        <div class="card">
+          <div class="section-title">Subjects</div>
+          <div id="subjList"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">Weekly study goals (hours)</div>
+          <div id="goalList"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">Pomodoro durations (minutes)</div>
+          <label class="field">Focus length<input class="input" type="number" min="1" id="setWork"></label>
+          <label class="field">Short break<input class="input" type="number" min="1" id="setShort"></label>
+          <label class="field">Long break<input class="input" type="number" min="1" id="setLong"></label>
+          <label class="field">Sessions before long break<input class="input" type="number" min="1" id="setInterval"></label>
+        </div>
+        <div class="card danger-zone">
+          <div class="section-title">Data</div>
+          <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Everything is stored locally in this browser. Back up regularly.</p>
+          <div class="row" style="margin-bottom:10px;">
+            <button class="btn" id="exportBtn">Export backup (.json)</button>
+            <button class="btn" id="importBtn">Import backup</button>
+          </div>
+          <input type="file" id="importFile" accept="application/json" style="display:none;">
+          <button class="btn btn-danger" id="resetBtn">Reset all data</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ===================== constants ===================== */
+const KEY = "studyDashboard.v1";
+const PALETTE = ["#b85c38","#5f8a63","#a87e23","#5c7a99","#7e5a75","#3f7e74","#a8465a"];
+const DAYS = ["Mon","Tue","Wed","Thu","Fri"];
+const TABS = [
+  {id:"overview", label:"Overview", icon:'<path d="M3 11l9-7 9 7"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/>'},
+  {id:"timetable", label:"Timetable", icon:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18"/><path d="M8 2v4"/><path d="M16 2v4"/>'},
+  {id:"pomodoro", label:"Pomodoro", icon:'<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/>'},
+  {id:"checklist", label:"Checklist", icon:'<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 6l1 1 2-2"/><path d="M4 12l1 1 2-2"/><path d="M4 18l1 1 2-2"/>'},
+  {id:"marks", label:"Marks", icon:'<path d="M3 17l5-5 4 4 8-9"/><path d="M14 7h6v6"/>'},
+  {id:"analytics", label:"Analytics", icon:'<path d="M4 20V10"/><path d="M11 20V4"/><path d="M18 20v-7"/>'},
+  {id:"settings", label:"Settings", icon:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.96 19.7a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.96a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.96 4.6a1.7 1.7 0 0 0 1.04-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.04 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 8.96a1.7 1.7 0 0 0 1.56 1.04H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.04z"/>'}
+];
+
+/* ===================== state ===================== */
+function seedSubjects(){
+  const names = ["Chemistry","Biology","Maths Ext 1","Maths Advanced","English Advanced","Latin Continuers","Economics"];
+  return names.map((n,i)=>({id:uid(), name:n, color:PALETTE[i % PALETTE.length]}));
+}
+function defaultState(){
+  return {
+    subjects: seedSubjects(),
+    timetable: [],
+    tasks: [],
+    marks: [],
+    sessions: [],
+    notes: "",
+    goals: {},
+    benchmarks: {},
+    settings: { pomodoroWork:25, pomodoroShort:5, pomodoroLong:15, longBreakInterval:4, theme:"light", lastTab:"overview" }
+  };
+}
+let state = loadState();
+function loadState(){
+  try{
+    const raw = localStorage.getItem(KEY);
+    if(!raw) return defaultState();
+    const parsed = JSON.parse(raw);
+    const d = defaultState();
+    return Object.assign({}, d, parsed, { settings: Object.assign({}, d.settings, parsed.settings||{}) });
+  }catch(e){ return defaultState(); }
+}
+function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
+
+/* ===================== helpers ===================== */
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+function isoDate(d){ d = d||new Date(); const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0"); return `${y}-${m}-${day}`; }
+function todayISO(){ return isoDate(new Date()); }
+function mondayIndex(d){ const js=d.getDay(); return js===0?6:js-1; }
+function addDays(dateStr, n){ const d=new Date(dateStr+"T00:00:00"); d.setDate(d.getDate()+n); return isoDate(d); }
+function daysBetween(a,b){ return Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000); }
+function timeToMin(t){ const [h,m]=t.split(":").map(Number); return h*60+m; }
+function minToTimeLabel(mins){
+  let h=Math.floor(mins/60), m=mins%60; const ap = h>=12?"PM":"AM"; let hh = h%12; if(hh===0) hh=12;
+  return `${hh}:${String(m).padStart(2,"0")} ${ap}`;
+}
+function fmtHM(mins){ const h=Math.floor(mins/60), m=mins%60; return h>0? `${h}h ${m}m` : `${m}m`; }
+function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function subjectById(id){ return state.subjects.find(s=>s.id===id); }
+function nextPaletteColor(){
+  const used = state.subjects.map(s=>s.color);
+  return PALETTE.find(c=>!used.includes(c)) || PALETTE[state.subjects.length % PALETTE.length];
+}
+function icon(svgInner, size){ return `<svg viewBox="0 0 24 24" width="${size||15}" height="${size||15}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgInner}</svg>`; }
+
+/* ===================== quick-add natural-language parsing ===================== */
+const QA_DOW_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const QA_WEEKDAYS = [
+  {re:/\b(mon|monday)\b/i, day:1}, {re:/\b(tues?|tuesday)\b/i, day:2}, {re:/\b(wed(nes)?|wednesday)\b/i, day:3},
+  {re:/\b(thur?s?|thursday)\b/i, day:4}, {re:/\b(fri|friday)\b/i, day:5}, {re:/\b(sat|saturday)\b/i, day:6}, {re:/\b(sun|sunday)\b/i, day:0},
+];
+const QA_PRIORITY = [
+  {re:/(!p1|!high|\basap\b|\burgent\b)/i, level:1, label:"High"},
+  {re:/(!p2|!med(ium)?)/i, level:2, label:"Medium"},
+  {re:/(!p3|!low)/i, level:3, label:"Low"},
+];
+function qaNextWeekday(targetDow){
+  const cur = new Date().getDay();
+  return addDays(todayISO(), (targetDow - cur + 7) % 7);
+}
+function parseQuickAdd(raw){
+  let text = raw, due = null, dueLabel = null, priority = 0, priLabel = null;
+  if(/\btoday\b/i.test(text)){ due = todayISO(); dueLabel = "Today"; text = text.replace(/\btoday\b/i, ""); }
+  else if(/\b(tomorrow|tmrw|tmr)\b/i.test(text)){ due = addDays(todayISO(),1); dueLabel = "Tomorrow"; text = text.replace(/\b(tomorrow|tmrw|tmr)\b/i, ""); }
+  else if(/\bnext week\b/i.test(text)){ due = addDays(todayISO(),7); dueLabel = "Next week"; text = text.replace(/\bnext week\b/i, ""); }
+  else {
+    const inDays = text.match(/\bin (\d+)\s*d(ays?)?\b/i);
+    if(inDays){ const n = Number(inDays[1]); due = addDays(todayISO(), n); dueLabel = `In ${n}d`; text = text.replace(inDays[0], ""); }
+    else{
+      for(const w of QA_WEEKDAYS){
+        const m = text.match(w.re);
+        if(m){ due = qaNextWeekday(w.day); dueLabel = QA_DOW_NAMES[w.day]; text = text.replace(w.re, ""); break; }
+      }
+    }
+  }
+  for(const p of QA_PRIORITY){
+    const m = text.match(p.re);
+    if(m){ priority = p.level; priLabel = p.label; text = text.replace(p.re, ""); break; }
+  }
+  text = text.replace(/\s{2,}/g, " ").trim();
+  return { title: text, due, dueLabel, priority, priLabel };
+}
+function qaHintHtml(parsed){
+  if(!parsed.dueLabel && !parsed.priLabel) return "";
+  return `${parsed.dueLabel?`<span class="badge badge-accent">${parsed.dueLabel}</span>`:""}${parsed.priLabel?`<span class="badge ${parsed.priority===1?'badge-danger':parsed.priority===2?'badge-warn':'badge-muted'}">${parsed.priLabel}</span>`:""}`;
+}
+
+function renderStreakChip(){
+  const streak = computeStreak();
+  const filled = streak===0 ? 0 : (streak % 5===0 ? 5 : streak % 5);
+  let dots = "";
+  for(let i=0;i<5;i++){
+    dots += `<span style="width:5px;height:5px;border-radius:50%;background:${i<filled?'var(--accent)':'var(--border)'};flex-shrink:0;"></span>`;
+  }
+  document.getElementById("streakChip").innerHTML = `<div style="display:flex; gap:3px;">${dots}</div><span>${streak}&nbsp;day streak</span>`;
+}
+
+/* ===================== toast ===================== */
+function toast(msg){
+  let t = document.createElement("div");
+  t.textContent = msg;
+  t.style.cssText = "position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 18px;border-radius:999px;font-size:13px;font-weight:600;z-index:999;box-shadow:var(--shadow-modal);";
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2200);
+}
+
+/* ===================== popover ===================== */
+let activePopover = null;
+function closePopover(){
+  if(!activePopover) return;
+  activePopover.el.remove();
+  document.removeEventListener("mousedown", activePopover.outside, true);
+  document.removeEventListener("keydown", activePopover.esc);
+  activePopover = null;
+}
+function openPopover(anchor, title, bodyHtml, onMount){
+  closePopover();
+  const pop = document.createElement("div");
+  pop.className = "popover";
+  pop.innerHTML = `${title?`<h3>${title}</h3>`:""}<div class="popover-body">${bodyHtml}</div>`;
+  document.body.appendChild(pop);
+
+  const r = anchor.getBoundingClientRect();
+  const popW = 320;
+  let left = Math.round(r.right - popW);
+  left = Math.max(12, Math.min(left, window.innerWidth - popW - 12));
+  let top = Math.round(r.bottom + 10);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+
+  const arrow = document.createElement("div");
+  arrow.className = "popover-arrow arrow-top";
+  arrow.style.right = Math.max(16, Math.min(popW - 30, (r.left + r.width/2) - left - 6)) + "px";
+  pop.appendChild(arrow);
+
+  requestAnimationFrame(()=>{
+    const ph = pop.offsetHeight;
+    if(top + ph > window.innerHeight - 12){
+      const newTop = r.top - ph - 10;
+      pop.style.top = Math.max(12, newTop) + "px";
+      arrow.className = "popover-arrow arrow-bottom";
+    }
+  });
+
+  const outside = e=>{ if(!pop.contains(e.target) && e.target!==anchor && !anchor.contains(e.target)) closePopover(); };
+  const esc = e=>{ if(e.key==="Escape") closePopover(); };
+  setTimeout(()=> document.addEventListener("mousedown", outside, true), 0);
+  document.addEventListener("keydown", esc);
+  activePopover = { el: pop, outside, esc };
+
+  if(onMount) onMount(pop.querySelector(".popover-body"));
+  return pop;
+}
+function promptPopover(anchor, title, opts, onSave){
+  opts = opts || {};
+  const body = `
+    <label class="field">${opts.label||"Name"}<input class="input" id="pmValue" value="${escapeHtml(opts.value||"")}" placeholder="${escapeHtml(opts.placeholder||"")}"></label>
+    ${opts.color!==undefined?`<label class="field">Colour<input type="color" class="color-input" id="pmColor" value="${opts.color}"></label>`:""}
+    <div class="modal-actions"><button class="btn" id="pmCancel">Cancel</button><button class="btn btn-primary" id="pmSave">Save</button></div>`;
+  openPopover(anchor, title, body, root=>{
+    const input = root.querySelector("#pmValue");
+    input.focus(); input.select();
+    const submit = ()=>{
+      const val = input.value.trim();
+      if(!val){ toast("This can't be empty"); return; }
+      const color = opts.color!==undefined ? root.querySelector("#pmColor").value : undefined;
+      closePopover();
+      onSave(val, color);
+    };
+    input.addEventListener("keydown", e=>{ if(e.key==="Enter") submit(); });
+    root.querySelector("#pmCancel").addEventListener("click", closePopover);
+    root.querySelector("#pmSave").addEventListener("click", submit);
+  });
+}
+
+/* ===================== modal (for surfaces too big for a popover) ===================== */
+function openModal(title, bodyHtml, onMount){
+  closeModal();
+  const root = document.createElement("div");
+  root.className = "modal-overlay";
+  root.id = "genericModalOverlay";
+  root.innerHTML = `<div class="modal"><h3>${title}</h3><div class="modal-body">${bodyHtml}</div></div>`;
+  document.body.appendChild(root);
+  root.addEventListener("mousedown", e=>{ if(e.target===root) closeModal(); });
+  const esc = e=>{ if(e.key==="Escape") closeModal(); };
+  document.addEventListener("keydown", esc);
+  root._esc = esc;
+  if(onMount) onMount(root.querySelector(".modal-body"));
+}
+function closeModal(){
+  const root = document.getElementById("genericModalOverlay");
+  if(!root) return;
+  document.removeEventListener("keydown", root._esc);
+  root.remove();
+}
+
+/* ===================== timetable import (CSV / ICS) ===================== */
+let importState = { rows: [] };
+function findSubjectByName(name){
+  const n = (name||"").trim().toLowerCase();
+  return state.subjects.find(s=> s.name.trim().toLowerCase()===n);
+}
+function splitCsvLine(line){
+  const out = []; let cur = "", inQ = false;
+  for(let i=0;i<line.length;i++){
+    const c = line[i];
+    if(c === '"'){ inQ = !inQ; continue; }
+    if(c === "," && !inQ){ out.push(cur); cur = ""; continue; }
+    cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+function parseDayName(s){
+  const t = (s||"").trim().toLowerCase();
+  const map = {mon:0, monday:0, tue:1, tues:1, tuesday:1, wed:2, weds:2, wednesday:2, thu:3, thur:3, thurs:3, thursday:3, fri:4, friday:4};
+  return map[t]!==undefined ? map[t] : null;
+}
+function parseTimeFlexible(s){
+  if(!s) return null;
+  s = s.trim();
+  let m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if(m){ const h=+m[1], mi=+m[2]; if(h<24 && mi<60) return String(h).padStart(2,"0")+":"+String(mi).padStart(2,"0"); }
+  m = s.match(/^(\d{1,2}):(\d{2})\s*([ap]m)$/i);
+  if(m){ let h=+m[1]; const mi=+m[2]; const ap=m[3].toLowerCase(); if(h===12) h=0; if(ap==="pm") h+=12; if(h<24 && mi<60) return String(h).padStart(2,"0")+":"+String(mi).padStart(2,"0"); }
+  m = s.match(/^(\d{1,2})\s*([ap]m)$/i);
+  if(m){ let h=+m[1]; const ap=m[2].toLowerCase(); if(h===12) h=0; if(ap==="pm") h+=12; return String(h).padStart(2,"0")+":00"; }
+  return null;
+}
+function parseCSV(text){
+  const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length);
+  if(!lines.length) return {rows:[], error:"That file looks empty."};
+  const header = splitCsvLine(lines[0]).map(h=>h.trim().toLowerCase());
+  const idx = {
+    day: header.indexOf("day"), subject: header.indexOf("subject"),
+    start: header.indexOf("start"), end: header.indexOf("end"),
+    room: header.indexOf("room"), teacher: header.indexOf("teacher")
+  };
+  if(idx.day<0 || idx.subject<0 || idx.start<0 || idx.end<0){
+    return {rows:[], error:"CSV needs a header row with Day, Subject, Start, End columns (Room and Teacher are optional)."};
+  }
+  const rows = [];
+  for(let i=1;i<lines.length;i++){
+    const cols = splitCsvLine(lines[i]);
+    const dayRaw = (cols[idx.day]||"").trim();
+    const subject = (cols[idx.subject]||"").trim();
+    const startRaw = (cols[idx.start]||"").trim();
+    const endRaw = (cols[idx.end]||"").trim();
+    const room = idx.room>=0 ? (cols[idx.room]||"").trim() : "";
+    const teacher = idx.teacher>=0 ? (cols[idx.teacher]||"").trim() : "";
+    const day = parseDayName(dayRaw);
+    const start = parseTimeFlexible(startRaw);
+    const end = parseTimeFlexible(endRaw);
+    let error = null;
+    if(day===null) error = `Unrecognised day "${dayRaw}"`;
+    else if(!subject) error = "Missing subject";
+    else if(!start) error = `Unrecognised start time "${startRaw}"`;
+    else if(!end) error = `Unrecognised end time "${endRaw}"`;
+    else if(timeToMin(end)<=timeToMin(start)) error = "End time must be after start";
+    rows.push({ day, subject, start, end, room, teacher, error, raw: lines[i] });
+  }
+  return {rows, error:null};
+}
+function unescapeICS(s){ return (s||"").replace(/\\,/g,",").replace(/\\;/g,";").replace(/\\n/gi," ").replace(/\\\\/g,"\\"); }
+function parseICSDate(v){
+  if(!v) return null;
+  const m = v.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+  if(!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+  return { day: mondayIndex(d), time: `${m[4]}:${m[5]}` };
+}
+function parseICS(text){
+  const raw = text.split(/\r\n|\n|\r/);
+  const lines = [];
+  raw.forEach(l=>{
+    if((l.startsWith(" ")||l.startsWith("\t")) && lines.length) lines[lines.length-1] += l.slice(1);
+    else lines.push(l);
+  });
+  const events = []; let cur = null;
+  lines.forEach(l=>{
+    if(l.startsWith("BEGIN:VEVENT")) cur = {};
+    else if(l.startsWith("END:VEVENT")){ if(cur) events.push(cur); cur = null; }
+    else if(cur){
+      const i = l.indexOf(":"); if(i<0) return;
+      const key = l.slice(0,i).split(";")[0].toUpperCase();
+      const val = l.slice(i+1);
+      if(key==="DTSTART") cur.dtstart = val;
+      else if(key==="DTEND") cur.dtend = val;
+      else if(key==="SUMMARY") cur.summary = unescapeICS(val);
+      else if(key==="LOCATION") cur.location = unescapeICS(val);
+    }
+  });
+  if(!events.length) return {rows:[], error:"No events found in this calendar file."};
+  const rows = events.map(ev=>{
+    const s = parseICSDate(ev.dtstart), e = parseICSDate(ev.dtend);
+    if(!s || !e) return { error:"Couldn't read this event's time", raw: ev.summary||"(untitled)" };
+    if(s.day===null || s.day>4) return null;
+    return { day:s.day, subject: ev.summary||"Untitled", start:s.time, end:e.time, room: ev.location||"", teacher:"", error:null };
+  }).filter(Boolean);
+  return {rows, error: rows.length? null : "No weekday events found — only weekend events were in this file."};
+}
+document.getElementById("ttImportBtn").addEventListener("click", openImportModal);
+function openImportModal(){
+  importState = { rows: [] };
+  const body = `
+    <label class="field">Upload a .csv or .ics file
+      <input type="file" class="input" id="impFile" accept=".csv,.ics,text/calendar,text/csv">
+    </label>
+    <div style="text-align:center; font-size:11px; color:var(--text-faint); margin:2px 0 10px;">— or paste CSV text —</div>
+    <label class="field">CSV <span style="font-weight:400;">(header row: Day,Subject,Start,End,Room,Teacher)</span>
+      <textarea class="input" id="impPaste" rows="4" style="font-family:var(--mono); font-size:12px;" placeholder="Day,Subject,Start,End,Room,Teacher&#10;Mon,Chemistry,09:00,10:00,Lab 3,Dr Lin"></textarea>
+    </label>
+    <button class="btn btn-sm" id="impParseBtn">Parse</button>
+    <div id="impPreviewWrap"></div>
+    <div class="modal-actions" id="impCancelWrap"><button class="btn" id="impCancel">Cancel</button></div>
+  `;
+  openModal("Import timetable", body, root=>{
+    root.querySelector("#impFile").addEventListener("change", e=>{
+      const file = e.target.files[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ()=> runImportParse(reader.result, file.name, root);
+      reader.readAsText(file);
+    });
+    root.querySelector("#impParseBtn").addEventListener("click", ()=>{
+      const text = root.querySelector("#impPaste").value;
+      if(!text.trim()){ toast("Paste some CSV text or choose a file first"); return; }
+      runImportParse(text, "pasted.csv", root);
+    });
+    root.querySelector("#impCancel").addEventListener("click", closeModal);
+  });
+}
+function runImportParse(text, filename, root){
+  const isICS = /^BEGIN:VCALENDAR/im.test(text) || /\.ics$/i.test(filename);
+  const result = isICS ? parseICS(text) : parseCSV(text);
+  importState.rows = result.rows.map(r=> ({...r, include: !r.error}));
+  renderImportPreview(root, result.error);
+}
+function renderImportPreview(root, topError){
+  const wrap = root.querySelector("#impPreviewWrap");
+  root.querySelector("#impCancelWrap").style.display = topError || !importState.rows.length ? "flex" : "none";
+  if(topError){ wrap.innerHTML = `<hr class="sep"><div class="empty" style="color:var(--danger);">${escapeHtml(topError)}</div>`; return; }
+  const rows = importState.rows;
+  const validCount = rows.filter(r=>!r.error).length;
+  const newSubjects = [...new Set(rows.filter(r=>!r.error && !findSubjectByName(r.subject)).map(r=>r.subject.trim()))];
+  wrap.innerHTML = `
+    <hr class="sep">
+    <div style="font-size:12.5px; color:var(--text-dim); margin-bottom:8px;">
+      Found ${rows.length} row${rows.length===1?"":"s"} — ${validCount} usable${rows.length-validCount>0?`, ${rows.length-validCount} skipped`:""}.
+      ${newSubjects.length?` ${newSubjects.length} new subject${newSubjects.length===1?"":"s"} will be created: ${newSubjects.map(escapeHtml).join(", ")}.`:""}
+    </div>
+    <div style="max-height:220px; overflow:auto;">
+    <table class="import-table"><thead><tr><th></th><th>Day</th><th>Subject</th><th>Start</th><th>End</th><th>Room</th></tr></thead><tbody>
+      ${rows.map((r,i)=> r.error ? `
+        <tr class="row-error"><td></td><td colspan="5">${escapeHtml(r.error)}${r.raw?` — "${escapeHtml(r.raw)}"`:""}</td></tr>
+      ` : `
+        <tr><td><input type="checkbox" data-imp-row="${i}" ${r.include?"checked":""}></td>
+          <td>${DAYS[r.day]}</td><td>${escapeHtml(r.subject)}${!findSubjectByName(r.subject)?' <span class="badge badge-accent">new</span>':""}</td>
+          <td>${r.start}</td><td>${r.end}</td><td>${escapeHtml(r.room||"—")}</td></tr>
+      `).join("")}
+    </tbody></table>
+    </div>
+    <div class="row" style="margin-top:12px;">
+      <label class="radio-field"><input type="radio" name="impMode" value="merge" checked> Merge with existing periods</label>
+      <label class="radio-field"><input type="radio" name="impMode" value="replace"> Replace all periods</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="impCancel2">Cancel</button>
+      <button class="btn btn-primary" id="impCommit">Import ${validCount} period${validCount===1?"":"s"}</button>
+    </div>
+  `;
+  wrap.querySelectorAll("[data-imp-row]").forEach(cb=> cb.addEventListener("change", e=>{
+    importState.rows[Number(e.target.dataset.impRow)].include = e.target.checked;
+  }));
+  wrap.querySelector("#impCancel2").addEventListener("click", closeModal);
+  wrap.querySelector("#impCommit").addEventListener("click", ()=>{
+    const mode = wrap.querySelector('input[name="impMode"]:checked').value;
+    commitImport(mode);
+  });
+}
+function commitImport(mode){
+  const toAdd = importState.rows.filter(r=>!r.error && r.include);
+  if(!toAdd.length){ toast("Nothing selected to import"); return; }
+  if(mode==="replace") state.timetable = [];
+  const createdByName = {};
+  toAdd.forEach(r=>{
+    const key = r.subject.trim().toLowerCase();
+    let subj = findSubjectByName(r.subject) || createdByName[key];
+    if(!subj){ subj = {id:uid(), name:r.subject.trim(), color: nextPaletteColor()}; state.subjects.push(subj); createdByName[key] = subj; }
+    state.timetable.push({ id:uid(), day:r.day, subjectId:subj.id, label:"", start:r.start, end:r.end, room:r.room||"", teacher:r.teacher||"" });
+  });
+  save(); closeModal(); renderTimetable();
+  toast(`Imported ${toAdd.length} period${toAdd.length===1?"":"s"}`);
+}
+
+/* ===================== active-days / streak ===================== */
+function getActiveDatesSet(){
+  const set = new Set();
+  state.sessions.forEach(s=> set.add(s.date));
+  state.tasks.forEach(cat=>{
+    cat.tasks.forEach(t=>{ if(t.done && t.completedAt) set.add(t.completedAt); });
+    cat.groups.forEach(g=> g.tasks.forEach(t=>{ if(t.done && t.completedAt) set.add(t.completedAt); }));
+  });
+  return set;
+}
+function computeStreak(){
+  const set = getActiveDatesSet();
+  let d = todayISO();
+  if(!set.has(d)) d = addDays(d,-1);
+  let streak = 0;
+  while(set.has(d)){ streak++; d = addDays(d,-1); }
+  return streak;
+}
+function minutesOnDate(dateStr){ return state.sessions.filter(s=>s.date===dateStr).reduce((a,s)=>a+s.minutes,0); }
+
+/* ===================== tabs ===================== */
+function renderNav(){
+  const nav = document.getElementById("navList");
+  nav.innerHTML = TABS.map(t=>`<button class="navitem" data-tab="${t.id}">${icon(t.icon)}<span>${t.label}</span></button>`).join("");
+  nav.querySelectorAll(".navitem").forEach(b=> b.addEventListener("click", ()=> switchTab(b.dataset.tab)));
+}
+function switchTab(id){
+  document.querySelectorAll(".tab").forEach(el=> el.classList.toggle("active", el.id === "tab-"+id));
+  document.querySelectorAll(".navitem").forEach(el=> el.classList.toggle("active", el.dataset.tab === id));
+  state.settings.lastTab = id; save();
+  renderStreakChip();
+  if(id==="overview") renderOverview();
+  if(id==="timetable") renderTimetable();
+  if(id==="pomodoro") renderPomodoro();
+  if(id==="checklist") renderChecklist();
+  if(id==="marks") renderMarks();
+  if(id==="analytics") renderAnalytics();
+  if(id==="settings") renderSettings();
+}
+
+/* ===================== theme ===================== */
+function applyTheme(){
+  document.body.setAttribute("data-theme", state.settings.theme);
+  document.getElementById("themeToggle").textContent = state.settings.theme==="dark" ? "☀ Light mode" : "🌙 Dark mode";
+}
+document.getElementById("themeToggle").addEventListener("click", ()=>{
+  state.settings.theme = state.settings.theme==="dark" ? "light" : "dark";
+  save(); applyTheme();
+});
+
+/* ===================== OVERVIEW ===================== */
+function renderOverview(){
+  const now = new Date();
+  document.getElementById("ovDate").textContent = now.toLocaleDateString(undefined,{weekday:"long", month:"long", day:"numeric"});
+  const hr = now.getHours();
+  document.getElementById("ovGreeting").textContent = hr<12?"Good morning":hr<17?"Good afternoon":"Good evening";
+
+  document.getElementById("statStreak").textContent = computeStreak();
+  document.getElementById("statMinutesToday").textContent = minutesOnDate(todayISO());
+  document.getElementById("statPomosToday").textContent = state.sessions.filter(s=>s.date===todayISO()).length;
+  renderHeroHeatmap();
+  renderSubjectBalance();
+  const doneToday = allTasks().filter(t=>t.done && t.completedAt===todayISO()).length;
+  document.getElementById("statTasksToday").textContent = doneToday;
+  renderStreakChip();
+
+  // today's classes
+  const dayIdx = mondayIndex(now);
+  const nowMin = now.getHours()*60+now.getMinutes();
+  const todays = state.timetable.filter(p=>p.day===dayIdx).sort((a,b)=>timeToMin(a.start)-timeToMin(b.start));
+  const ovToday = document.getElementById("ovToday");
+  if(dayIdx>4){ ovToday.innerHTML = `<div class="empty">No classes — it's the weekend.</div>`; }
+  else if(!todays.length){ ovToday.innerHTML = `<div class="empty">No periods added for today yet.</div>`; }
+  else{
+    ovToday.innerHTML = todays.map(p=>{
+      const subj = subjectById(p.subjectId);
+      const color = subj?subj.color:"#a1a1aa";
+      const name = subj?subj.name:(p.label||"Untitled");
+      const active = nowMin>=timeToMin(p.start) && nowMin<timeToMin(p.end);
+      return `<div class="period-row">
+        <div class="period-time">${minToTimeLabel(timeToMin(p.start))}</div>
+        <div class="period-bar" style="background:${color}"></div>
+        <div><div class="period-name">${escapeHtml(name)}</div><div class="period-meta">${[p.room,p.teacher].filter(Boolean).map(escapeHtml).join(" · ")}</div></div>
+        ${active?'<span class="now-tag">NOW</span>':''}
+      </div>`;
+    }).join("");
+  }
+
+  // due soon (tasks due within 2 days, not done)
+  const due = allTasks().filter(t=> !t.done && t.due).map(t=>({...t, delta: daysBetween(todayISO(), t.due)}))
+    .filter(t=> t.delta<=2).sort((a,b)=>a.delta-b.delta).slice(0,6);
+  const ovDue = document.getElementById("ovDue");
+  ovDue.innerHTML = due.length? due.map(t=>{
+    const overdue = t.delta<0;
+    const label = overdue? `${Math.abs(t.delta)}d overdue` : t.delta===0? "Today" : t.delta===1? "Tomorrow" : `In ${t.delta}d`;
+    return `<div class="due-row"><div class="due-check" data-toggle-task="${t.id}" data-cat="${t.catId}" data-group="${t.groupId||''}"></div>
+      <div style="flex:1; font-size:13px;">${escapeHtml(t.title)}</div>
+      <span class="badge ${overdue?'badge-danger':'badge-warn'}">${label}</span></div>`;
+  }).join("") : `<div class="empty">Nothing due in the next couple of days.</div>`;
+  ovDue.querySelectorAll("[data-toggle-task]").forEach(el=> el.addEventListener("click", ()=>{
+    toggleTask(el.dataset.cat, el.dataset.group||null, el.dataset.toggleTask); renderOverview();
+  }));
+
+  // upcoming assessments (marks with no score yet, future date)
+  const upcoming = state.marks.filter(m=> m.score==null && m.date>=todayISO()).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,6);
+  const ovAssess = document.getElementById("ovAssess");
+  ovAssess.innerHTML = upcoming.length? upcoming.map(m=>{
+    const subj = subjectById(m.subjectId);
+    const d = daysBetween(todayISO(), m.date);
+    return `<div class="due-row"><span class="dot" style="background:${subj?subj.color:'#aaa'}"></span>
+      <div style="flex:1; font-size:13px;"><b>${escapeHtml(m.name)}</b> — ${escapeHtml(subj?subj.name:'')}</div>
+      <span class="badge badge-muted">${d===0?'Today':d+'d'}</span></div>`;
+  }).join("") : `<div class="empty">No upcoming assessments logged.</div>`;
+
+  const notesEl = document.getElementById("ovNotes");
+  if(document.activeElement !== notesEl) notesEl.value = state.notes;
+}
+document.getElementById("ovNotes").addEventListener("input", e=>{ state.notes = e.target.value; save(); });
+
+function renderHeroHeatmap(){
+  document.getElementById("heroStreakNum").textContent = computeStreak();
+  const days = [];
+  for(let i=364;i>=0;i--) days.push(addDays(todayISO(), -i));
+  const maxMin = Math.max(1, ...days.map(minutesOnDate));
+  document.getElementById("heroHeatGrid").innerHTML = days.map(d=>{
+    const min = minutesOnDate(d);
+    const alpha = min===0? 0 : 0.25 + 0.75*Math.min(1,min/maxMin);
+    const bg = min===0 ? "var(--surface)" : `color-mix(in srgb, var(--accent) ${Math.round(alpha*100)}%, var(--surface))`;
+    return `<div class="heat-cell" title="${d}: ${min}m" style="background:${bg}"></div>`;
+  }).join("");
+}
+function renderSubjectBalance(){
+  const el = document.getElementById("ovSubjectBalance");
+  const totals = state.subjects.map(s=>({
+    s, minutes: state.sessions.filter(x=>x.subjectId===s.id).reduce((a,x)=>a+x.minutes,0)
+  })).filter(x=>x.minutes>0).sort((a,b)=>b.minutes-a.minutes).slice(0,5);
+  if(!totals.length){ el.innerHTML = `<div class="empty">No study sessions logged yet.</div>`; return; }
+  const max = totals[0].minutes;
+  el.innerHTML = totals.map(t=>`
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+      <div style="width:82px; flex-shrink:0; font-size:12px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(t.s.name)}</div>
+      <div style="flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden;">
+        <div style="height:100%; width:${(t.minutes/max*100).toFixed(1)}%; background:${t.s.color}; border-radius:4px;"></div>
+      </div>
+    </div>`).join("");
+}
+
+function allTasks(){
+  const out = [];
+  state.tasks.forEach(cat=>{
+    cat.tasks.forEach(t=> out.push({...t, catId:cat.id, groupId:null}));
+    cat.groups.forEach(g=> g.tasks.forEach(t=> out.push({...t, catId:cat.id, groupId:g.id})));
+  });
+  return out;
+}
+function toggleTask(catId, groupId, taskId){
+  const cat = state.tasks.find(c=>c.id===catId); if(!cat) return;
+  const arr = groupId ? (cat.groups.find(g=>g.id===groupId)||{}).tasks : cat.tasks;
+  if(!arr) return;
+  const t = arr.find(x=>x.id===taskId); if(!t) return;
+  t.done = !t.done;
+  t.completedAt = t.done ? todayISO() : null;
+  save();
+  renderStreakChip();
+}
+
+/* ===================== TIMETABLE ===================== */
+const DAY_START = 8*60, DAY_END = 16*60, PX_PER_MIN = 1.35;
+function renderTimetable(){
+  let start = DAY_START, end = DAY_END;
+  state.timetable.forEach(p=>{ start = Math.min(start, timeToMin(p.start)); end = Math.max(end, timeToMin(p.end)); });
+  start = Math.floor(start/60)*60; end = Math.ceil(end/60)*60;
+  const totalH = (end-start)*PX_PER_MIN;
+  const todayIdx = mondayIndex(new Date());
+
+  let head = `<div class="tt-head"><div></div>` + DAYS.map((d,i)=>`<div class="${i===todayIdx?'today':''}">${d}</div>`).join("") + `</div>`;
+
+  let hours = `<div class="tt-hours" style="height:${totalH}px;">`;
+  for(let m=start; m<=end; m+=60){
+    hours += `<div class="tt-hour-label" style="top:${(m-start)*PX_PER_MIN}px;">${minToTimeLabel(m)}</div>`;
+  }
+  hours += `</div>`;
+
+  let cols = "";
+  for(let d=0; d<5; d++){
+    let inner = "";
+    for(let m=start; m<=end; m+=60){
+      inner += `<div class="tt-hline" style="top:${(m-start)*PX_PER_MIN}px;"></div>`;
+    }
+    const periods = state.timetable.filter(p=>p.day===d);
+    periods.forEach(p=>{
+      const subj = subjectById(p.subjectId);
+      const color = subj?subj.color:"#94a3b8";
+      const top = (timeToMin(p.start)-start)*PX_PER_MIN;
+      const h = Math.max(20,(timeToMin(p.end)-timeToMin(p.start))*PX_PER_MIN - 3);
+      inner += `<div class="tt-block" data-edit-period="${p.id}" style="top:${top}px; height:${h}px; background:${color}22; border-color:${color}; color:${color};">
+        <b>${escapeHtml(subj?subj.name:(p.label||"Untitled"))}</b>${minToTimeLabel(timeToMin(p.start))}–${minToTimeLabel(timeToMin(p.end))}${p.room?" · "+escapeHtml(p.room):""}
+      </div>`;
+    });
+    if(d===todayIdx){
+      const now = new Date(); const nowMin = now.getHours()*60+now.getMinutes();
+      if(nowMin>=start && nowMin<=end){
+        inner += `<div class="tt-now-line" style="top:${(nowMin-start)*PX_PER_MIN}px;"><div class="tt-now-dot"></div></div>`;
+      }
+    }
+    inner += `<button class="btn btn-sm tt-add-col-btn" data-add-day="${d}">+ Add</button>`;
+    cols += `<div class="tt-col ${d===todayIdx?'today':''}" style="height:${totalH}px;">${inner}</div>`;
+  }
+  const body = `<div class="tt-body">${hours}${cols}</div>`;
+  document.getElementById("ttGrid").innerHTML = head + body;
+
+  document.getElementById("ttGrid").querySelectorAll("[data-edit-period]").forEach(el=>
+    el.addEventListener("click", ()=> openPeriodModal(el.dataset.editPeriod, undefined, el)));
+  document.getElementById("ttGrid").querySelectorAll("[data-add-day]").forEach(el=>
+    el.addEventListener("click", ()=> openPeriodModal(null, Number(el.dataset.addDay), el)));
+
+  document.getElementById("ttLegend").innerHTML = state.subjects.map(s=>
+    `<span><span class="dot" style="background:${s.color}"></span>${escapeHtml(s.name)}</span>`).join("");
+}
+document.getElementById("ttAddBtn").addEventListener("click", (e)=> openPeriodModal(null, mondayIndex(new Date())<=4?mondayIndex(new Date()):0, e.currentTarget));
+
+function openPeriodModal(periodId, prefillDay, anchor){
+  const editing = periodId ? state.timetable.find(p=>p.id===periodId) : null;
+  const subjOptions = state.subjects.map(s=>`<option value="${s.id}" ${editing&&editing.subjectId===s.id?"selected":""}>${escapeHtml(s.name)}</option>`).join("");
+  const body = `
+    <label class="field">Day
+      <select class="input" id="pfDay">${DAYS.map((d,i)=>`<option value="${i}" ${((editing?editing.day:prefillDay)===i)?"selected":""}>${d}</option>`).join("")}</select>
+    </label>
+    <label class="field">Subject
+      <select class="input" id="pfSubject"><option value="">— custom label —</option>${subjOptions}</select>
+    </label>
+    <label class="field" id="pfLabelWrap" style="display:${editing&&!editing.subjectId?'flex':'none'}">Custom label
+      <input class="input" id="pfLabel" value="${editing&&editing.label?escapeHtml(editing.label):''}" placeholder="e.g. Assembly">
+    </label>
+    <div class="row">
+      <label class="field">Start<input class="input" type="time" id="pfStart" value="${editing?editing.start:'09:00'}"></label>
+      <label class="field">End<input class="input" type="time" id="pfEnd" value="${editing?editing.end:'09:50'}"></label>
+    </div>
+    <div class="row">
+      <label class="field">Room<input class="input" id="pfRoom" value="${editing&&editing.room?escapeHtml(editing.room):''}"></label>
+      <label class="field">Teacher<input class="input" id="pfTeacher" value="${editing&&editing.teacher?escapeHtml(editing.teacher):''}"></label>
+    </div>
+    <div class="modal-actions">
+      ${editing?'<button class="btn btn-danger" id="pfDelete">Delete</button>':''}
+      <button class="btn" id="pfCancel">Cancel</button>
+      <button class="btn btn-primary" id="pfSave">Save</button>
+    </div>`;
+  openPopover(anchor, editing?"Edit period":"Add period", body, (root)=>{
+    root.querySelector("#pfSubject").addEventListener("change", e=>{
+      root.querySelector("#pfLabelWrap").style.display = e.target.value ? "none" : "flex";
+    });
+    root.querySelector("#pfCancel").addEventListener("click", closePopover);
+    if(editing) root.querySelector("#pfDelete").addEventListener("click", ()=>{
+      state.timetable = state.timetable.filter(p=>p.id!==editing.id); save(); closePopover(); renderTimetable();
+    });
+    root.querySelector("#pfSave").addEventListener("click", ()=>{
+      const start = root.querySelector("#pfStart").value, end = root.querySelector("#pfEnd").value;
+      if(!start || !end || timeToMin(end)<=timeToMin(start)){ toast("End time must be after start time"); return; }
+      const rec = {
+        id: editing?editing.id:uid(),
+        day: Number(root.querySelector("#pfDay").value),
+        subjectId: root.querySelector("#pfSubject").value || null,
+        label: root.querySelector("#pfLabel").value.trim(),
+        start, end,
+        room: root.querySelector("#pfRoom").value.trim(),
+        teacher: root.querySelector("#pfTeacher").value.trim()
+      };
+      if(editing){ Object.assign(editing, rec); } else { state.timetable.push(rec); }
+      save(); closePopover(); renderTimetable();
+    });
+  });
+}
+
+/* ===================== POMODORO / STOPWATCH ===================== */
+let timer = { timerType:"pomodoro", mode:"work", running:false, intervalId:null, cycles:0, segStart:null, accumSec:0 };
+function phaseSeconds(mode){
+  if(mode==="work") return state.settings.pomodoroWork*60;
+  if(mode==="short") return state.settings.pomodoroShort*60;
+  return state.settings.pomodoroLong*60;
+}
+function elapsedSec(){
+  return timer.accumSec + (timer.running ? Math.floor((Date.now()-timer.segStart)/1000) : 0);
+}
+function renderPomodoro(){
+  document.getElementById("timerModeTabs").innerHTML = ["pomodoro","stopwatch"].map(m=>
+    `<button class="${timer.timerType===m?'active':''}" data-timer-mode="${m}">${m==="pomodoro"?"Pomodoro":"Stopwatch"}</button>`).join("");
+  document.getElementById("timerModeTabs").querySelectorAll("button").forEach(b=>
+    b.addEventListener("click", ()=> switchTimerType(b.dataset.timerMode)));
+
+  const sel = document.getElementById("pomoSubject");
+  sel.innerHTML = `<option value="">General / no subject</option>` + state.subjects.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+  const isPomo = timer.timerType==="pomodoro";
+  document.getElementById("durRow").style.display = isPomo ? "flex" : "none";
+  document.getElementById("swHint").style.display = isPomo ? "none" : "block";
+  document.getElementById("durWork").value = state.settings.pomodoroWork;
+  document.getElementById("durShort").value = state.settings.pomodoroShort;
+  document.getElementById("durLong").value = state.settings.pomodoroLong;
+  renderTimerControls();
+  updateTimerDisplay();
+  renderPomoSessions();
+}
+function switchTimerType(type){
+  if(type===timer.timerType) return;
+  clearInterval(timer.intervalId); timer.intervalId=null;
+  timer.timerType = type; timer.mode = "work"; timer.running = false; timer.accumSec = 0; timer.segStart = null;
+  renderPomodoro();
+}
+function renderTimerControls(){
+  const wrap = document.getElementById("pomoControls");
+  if(timer.timerType==="stopwatch"){
+    wrap.innerHTML = `<button class="btn btn-primary" id="pomoStart">${timer.running?"Pause":"Start"}</button>
+      <button class="btn" id="pomoStopLog">Stop &amp; log</button>`;
+    wrap.querySelector("#pomoStopLog").addEventListener("click", onStopLog);
+  } else {
+    wrap.innerHTML = `<button class="btn btn-primary" id="pomoStart">${timer.running?"Pause":"Start"}</button>
+      <button class="btn" id="pomoReset">Reset</button>
+      <button class="btn" id="pomoSkip">Skip</button>`;
+    wrap.querySelector("#pomoReset").addEventListener("click", onReset);
+    wrap.querySelector("#pomoSkip").addEventListener("click", onSkip);
+  }
+  wrap.querySelector("#pomoStart").addEventListener("click", onStartPause);
+}
+function updateTimerDisplay(){
+  let secondsShown, modeLabel, frac;
+  if(timer.timerType==="stopwatch"){
+    secondsShown = elapsedSec();
+    modeLabel = "Stopwatch";
+    frac = timer.running ? 1 : 0;
+  } else {
+    const total = phaseSeconds(timer.mode);
+    secondsShown = Math.max(0, total - elapsedSec());
+    modeLabel = timer.mode==="work"?"Focus":timer.mode==="short"?"Short break":"Long break";
+    frac = total>0 ? secondsShown/total : 0;
+  }
+  const h = Math.floor(secondsShown/3600), m = Math.floor((secondsShown%3600)/60), s = secondsShown%60;
+  document.getElementById("pomoTime").textContent = h>0
+    ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`
+    : `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  document.getElementById("pomoMode").textContent = modeLabel;
+  const circumference = 2*Math.PI*100;
+  document.getElementById("pomoProgress").setAttribute("stroke-dasharray", circumference.toFixed(1));
+  document.getElementById("pomoProgress").setAttribute("stroke-dashoffset", (circumference*(1-frac)).toFixed(1));
+  const startBtn = document.getElementById("pomoStart");
+  if(startBtn) startBtn.textContent = timer.running ? "Pause" : "Start";
+}
+function beep(){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 660; g.gain.value = 0.08;
+    o.start(); setTimeout(()=>{ o.stop(); ctx.close(); }, 220);
+  }catch(e){}
+}
+function tick(){
+  if(timer.timerType==="pomodoro"){
+    const secondsLeft = phaseSeconds(timer.mode) - elapsedSec();
+    if(secondsLeft<=0){
+      clearInterval(timer.intervalId); timer.running=false; timer.intervalId=null;
+      completePhase();
+      return;
+    }
+  }
+  updateTimerDisplay();
+}
+function completePhase(){
+  beep();
+  if(timer.mode==="work"){
+    const subjectId = document.getElementById("pomoSubject").value || null;
+    state.sessions.push({ id:uid(), subjectId, date:todayISO(), minutes: state.settings.pomodoroWork, at: Date.now(), kind:"pomodoro" });
+    timer.cycles++;
+    save();
+    toast("Focus session complete — nice work!");
+    timer.mode = (timer.cycles % state.settings.longBreakInterval === 0) ? "long" : "short";
+  } else {
+    toast("Break's over — ready to focus?");
+    timer.mode = "work";
+  }
+  timer.accumSec = 0; timer.segStart = null;
+  renderPomoSessions(); renderOverview(); renderTimerControls();
+  updateTimerDisplay();
+}
+function onStartPause(){
+  if(timer.running){
+    timer.accumSec = elapsedSec(); timer.running=false; clearInterval(timer.intervalId); timer.intervalId=null;
+  } else {
+    if("Notification" in window && Notification.permission==="default") Notification.requestPermission();
+    timer.segStart = Date.now(); timer.running = true;
+    timer.intervalId = setInterval(tick, 1000);
+  }
+  renderTimerControls(); updateTimerDisplay();
+}
+function onReset(){
+  clearInterval(timer.intervalId); timer.intervalId=null; timer.running=false;
+  timer.accumSec = 0; timer.segStart = null;
+  renderTimerControls(); updateTimerDisplay();
+}
+function onSkip(){
+  clearInterval(timer.intervalId); timer.intervalId=null; timer.running=false;
+  timer.accumSec = phaseSeconds(timer.mode);
+  completePhase();
+}
+function onStopLog(){
+  const secs = elapsedSec();
+  clearInterval(timer.intervalId); timer.intervalId=null; timer.running=false;
+  if(secs>=30){
+    const subjectId = document.getElementById("pomoSubject").value || null;
+    const minutes = Math.max(1, Math.round(secs/60));
+    state.sessions.push({ id:uid(), subjectId, date:todayISO(), minutes, at: Date.now(), kind:"stopwatch" });
+    save();
+    toast(`Logged ${minutes} min — nice work!`);
+    renderPomoSessions(); renderOverview();
+  }
+  timer.accumSec = 0; timer.segStart = null;
+  renderTimerControls(); updateTimerDisplay();
+}
+["durWork","durShort","durLong"].forEach(id=>{
+  document.getElementById(id).addEventListener("change", e=>{
+    const v = Math.max(1, Number(e.target.value)||1);
+    if(id==="durWork") state.settings.pomodoroWork=v;
+    if(id==="durShort") state.settings.pomodoroShort=v;
+    if(id==="durLong") state.settings.pomodoroLong=v;
+    save();
+    if(!timer.running){ timer.accumSec = 0; updateTimerDisplay(); }
+  });
+});
+function renderPomoSessions(){
+  const todays = state.sessions.filter(s=>s.date===todayISO()).sort((a,b)=>b.at-a.at);
+  document.getElementById("pomoTodayTotal").textContent = fmtHM(todays.reduce((a,s)=>a+s.minutes,0));
+  const list = document.getElementById("pomoSessions");
+  list.innerHTML = todays.length ? todays.map(s=>{
+    const subj = subjectById(s.subjectId);
+    return `<div class="session-item"><span class="dot" style="background:${subj?subj.color:'#94a3b8'}"></span>
+      <span style="flex:1;">${subj?escapeHtml(subj.name):"General"}</span>
+      <span style="color:var(--text-dim);">${s.minutes}m</span></div>`;
+  }).join("") : `<div class="empty">No sessions logged yet today.</div>`;
+}
+
+/* ===================== CHECKLIST ===================== */
+let checklistState = { activeCat: null, filter: "all" };
+function ensureActiveCat(){
+  if(!state.tasks.length) return null;
+  if(!checklistState.activeCat || !state.tasks.find(c=>c.id===checklistState.activeCat)) checklistState.activeCat = state.tasks[0].id;
+  return checklistState.activeCat;
+}
+function renderChecklist(){
+  document.getElementById("checklistFilters").innerHTML = ["all","today","upcoming"].map(f=>
+    `<button class="${checklistState.filter===f?'active':''}" data-filter="${f}">${f==="all"?"All":f==="today"?"Today":"Upcoming"}</button>`).join("");
+  document.getElementById("checklistFilters").querySelectorAll("button").forEach(b=>
+    b.addEventListener("click", ()=>{ checklistState.filter=b.dataset.filter; renderChecklist(); }));
+
+  const sidebar = document.getElementById("catSidebar");
+  ensureActiveCat();
+  const catListHtml = state.tasks.map(c=>{
+    const remaining = c.tasks.filter(t=>!t.done).length + c.groups.reduce((a,g)=>a+g.tasks.filter(t=>!t.done).length,0);
+    return `<div class="cat-item ${c.id===checklistState.activeCat && checklistState.filter==='all'?'active':''}" data-cat="${c.id}">
+      <span class="dot" style="background:${c.color}"></span><span>${escapeHtml(c.name)}</span><span class="cat-count">${remaining}</span></div>`;
+  }).join("");
+  sidebar.innerHTML = catListHtml + `<div id="catAddSlot"></div>`;
+  sidebar.querySelectorAll("[data-cat]").forEach(el=> el.addEventListener("click", ()=>{
+    checklistState.activeCat = el.dataset.cat; checklistState.filter="all"; renderChecklist();
+  }));
+  wireInlineAddCategory(document.getElementById("catAddSlot"));
+
+  const main = document.getElementById("checklistMain");
+  if(checklistState.filter !== "all"){
+    renderFilteredView(main);
+    return;
+  }
+  if(!state.tasks.length){ main.innerHTML = `<div class="empty">Add a category to start building your checklist.</div>`; return; }
+  const cat = state.tasks.find(c=>c.id===checklistState.activeCat);
+  if(!cat){ main.innerHTML = `<div class="empty">Select a category.</div>`; return; }
+  const totalCount = cat.tasks.length + cat.groups.reduce((a,g)=>a+g.tasks.length,0);
+  const doneCount = cat.tasks.filter(t=>t.done).length + cat.groups.reduce((a,g)=>a+g.tasks.filter(t=>t.done).length,0);
+  const pct = totalCount? Math.round(doneCount/totalCount*100):0;
+
+  let html = `<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+      <div style="font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px;"><span class="dot" style="background:${cat.color}"></span>${escapeHtml(cat.name)}</div>
+      <div>
+        <button class="iconbtn" data-rename-cat="${cat.id}">${icon('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>')}</button>
+        <button class="iconbtn" data-del-cat="${cat.id}">${icon('<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>')}</button>
+      </div>
+    </div>
+    <div class="progress-track"><div class="progress-fill" style="width:${pct}%; background:${cat.color};"></div></div>
+    <hr class="sep">`;
+
+  html += renderTaskList(cat.tasks, cat.id, null);
+  html += `<div class="add-task-row"><input class="input" placeholder='+ Add task — try "essay due fri !high"' data-new-task-cat="${cat.id}"><div class="qa-hint"></div></div>`;
+
+  cat.groups.forEach(g=>{
+    html += `<div class="group-block"><div class="group-head"><span>${escapeHtml(g.name)}</span>
+      <button class="iconbtn" data-del-group="${cat.id}:${g.id}">${icon('<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',13)}</button></div>`;
+    html += renderTaskList(g.tasks, cat.id, g.id);
+    html += `<div class="add-task-row"><input class="input" placeholder='+ Add task — try "read ch.4 sun"' data-new-task-cat="${cat.id}" data-new-task-group="${g.id}"><div class="qa-hint"></div></div></div>`;
+  });
+  html += `<button class="btn btn-sm" data-add-group="${cat.id}">+ Add section</button>`;
+  main.innerHTML = html;
+  wireTaskEvents(main);
+
+  main.querySelector(`[data-rename-cat]`).addEventListener("click", (e)=>{
+    promptPopover(e.currentTarget, "Rename category", {label:"Name", value:cat.name, color:cat.color}, (name,color)=>{
+      cat.name = name; cat.color = color; save(); renderChecklist();
+    });
+  });
+  main.querySelector(`[data-del-cat]`).addEventListener("click", ()=>{
+    if(confirm(`Delete category "${cat.name}" and all its tasks?`)){
+      state.tasks = state.tasks.filter(c=>c.id!==cat.id); checklistState.activeCat=null; save(); renderChecklist();
+    }
+  });
+  main.querySelector(`[data-add-group]`).addEventListener("click", (e)=>{
+    promptPopover(e.currentTarget, "Add section", {label:"Section name", placeholder:"e.g. Assignments"}, name=>{
+      cat.groups.push({id:uid(), name, tasks:[]}); save(); renderChecklist();
+    });
+  });
+  main.querySelectorAll("[data-del-group]").forEach(el=> el.addEventListener("click", ()=>{
+    const [catId, groupId] = el.dataset.delGroup.split(":");
+    const c = state.tasks.find(x=>x.id===catId);
+    if(confirm("Delete this section and its tasks?")){ c.groups = c.groups.filter(g=>g.id!==groupId); save(); renderChecklist(); }
+  }));
+}
+function renderTaskList(tasks, catId, groupId){
+  if(!tasks.length) return `<div class="empty" style="padding:8px 2px;">No tasks</div>`;
+  const priColors = {0:"transparent",1:"#dc2626",2:"#d97706",3:"#3b82f6"};
+  return tasks.map(t=>{
+    const overdue = t.due && !t.done && t.due<todayISO();
+    return `<div class="task-row">
+      <div class="task-check ${t.done?'done':''}" data-toggle="${catId}:${groupId||''}:${t.id}">${t.done?icon('<path d="M20 6L9 17l-5-5"/>',11):''}</div>
+      ${t.priority?`<span class="pri-dot" style="background:${priColors[t.priority]}"></span>`:''}
+      <span class="task-title ${t.done?'done':''}" data-edit-task="${catId}:${groupId||''}:${t.id}">${escapeHtml(t.title)}</span>
+      ${t.due?`<span class="task-due" style="background:${overdue?'var(--danger-soft)':'var(--surface-2)'}; color:${overdue?'var(--danger)':'var(--text-dim)'}">${t.due}</span>`:''}
+      <button class="iconbtn" data-del-task="${catId}:${groupId||''}:${t.id}">${icon('<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',13)}</button>
+    </div>`;
+  }).join("");
+}
+function findTaskArr(catId, groupId){
+  const cat = state.tasks.find(c=>c.id===catId); if(!cat) return null;
+  return groupId ? (cat.groups.find(g=>g.id===groupId)||{}).tasks : cat.tasks;
+}
+function wireTaskEvents(root){
+  root.querySelectorAll("[data-toggle]").forEach(el=> el.addEventListener("click", ()=>{
+    const [catId, groupId, taskId] = el.dataset.toggle.split(":");
+    toggleTask(catId, groupId||null, taskId); renderChecklist(); renderOverview();
+  }));
+  root.querySelectorAll("[data-del-task]").forEach(el=> el.addEventListener("click", ()=>{
+    const [catId, groupId, taskId] = el.dataset.delTask.split(":");
+    const arr = findTaskArr(catId, groupId||null);
+    const idx = arr.findIndex(t=>t.id===taskId); if(idx>-1) arr.splice(idx,1);
+    save(); renderChecklist();
+  }));
+  root.querySelectorAll("[data-edit-task]").forEach(el=> el.addEventListener("click", ()=>{
+    const [catId, groupId, taskId] = el.dataset.editTask.split(":");
+    openTaskEditModal(catId, groupId||null, taskId, el);
+  }));
+  root.querySelectorAll("[data-new-task-cat]").forEach(el=>{
+    const hint = el.parentElement.querySelector(".qa-hint");
+    el.addEventListener("input", ()=>{
+      const parsed = parseQuickAdd(el.value);
+      if(hint) hint.innerHTML = el.value.trim() ? qaHintHtml(parsed) : "";
+    });
+    el.addEventListener("keydown", e=>{
+      if(e.key==="Enter" && e.target.value.trim()){
+        const parsed = parseQuickAdd(e.target.value.trim());
+        const arr = findTaskArr(el.dataset.newTaskCat, el.dataset.newTaskGroup||null);
+        arr.push({id:uid(), title:parsed.title || e.target.value.trim(), done:false, due:parsed.due, priority:parsed.priority, completedAt:null});
+        e.target.value=""; save(); renderChecklist(); renderOverview();
+      }
+    });
+  });
+}
+function openTaskEditModal(catId, groupId, taskId, anchor){
+  const arr = findTaskArr(catId, groupId);
+  const t = arr.find(x=>x.id===taskId); if(!t) return;
+  const body = `
+    <label class="field">Title<input class="input" id="tfTitle" value="${escapeHtml(t.title)}"></label>
+    <div class="row">
+      <label class="field">Due date<input class="input" type="date" id="tfDue" value="${t.due||''}"></label>
+      <label class="field">Priority
+        <select class="input" id="tfPriority">
+          <option value="0" ${t.priority===0?'selected':''}>None</option>
+          <option value="1" ${t.priority===1?'selected':''}>P1 — High</option>
+          <option value="2" ${t.priority===2?'selected':''}>P2 — Medium</option>
+          <option value="3" ${t.priority===3?'selected':''}>P3 — Low</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-actions"><button class="btn" id="tfCancel">Cancel</button><button class="btn btn-primary" id="tfSave">Save</button></div>`;
+  openPopover(anchor, "Edit task", body, root=>{
+    root.querySelector("#tfCancel").addEventListener("click", closePopover);
+    root.querySelector("#tfSave").addEventListener("click", ()=>{
+      t.title = root.querySelector("#tfTitle").value.trim() || t.title;
+      t.due = root.querySelector("#tfDue").value || null;
+      t.priority = Number(root.querySelector("#tfPriority").value);
+      save(); closePopover(); renderChecklist(); renderOverview();
+    });
+  });
+}
+function renderFilteredView(main){
+  const list = allTasks().filter(t=>!t.done).filter(t=>{
+    if(!t.due) return false;
+    if(checklistState.filter==="today") return t.due<=todayISO();
+    if(checklistState.filter==="upcoming") return t.due>todayISO() && daysBetween(todayISO(),t.due)<=7;
+    return true;
+  }).sort((a,b)=> (a.due||"").localeCompare(b.due||""));
+  if(!list.length){ main.innerHTML = `<div class="empty">Nothing here.</div>`; return; }
+  main.innerHTML = list.map(t=>{
+    const cat = state.tasks.find(c=>c.id===t.catId);
+    const overdue = t.due < todayISO();
+    return `<div class="task-row">
+      <div class="task-check" data-toggle="${t.catId}:${t.groupId||''}:${t.id}"></div>
+      <span class="dot" style="background:${cat?cat.color:'#aaa'}"></span>
+      <span class="task-title" style="flex:1;">${escapeHtml(t.title)} <span style="color:var(--text-faint); font-size:11.5px;">— ${escapeHtml(cat?cat.name:'')}</span></span>
+      <span class="task-due" style="background:${overdue?'var(--danger-soft)':'var(--surface-2)'}; color:${overdue?'var(--danger)':'var(--text-dim)'}">${t.due}</span>
+    </div>`;
+  }).join("");
+  wireTaskEvents(main);
+}
+function wireInlineAddCategory(slot){
+  if(!slot) return;
+  slot.innerHTML = `<div class="inline-add-trigger" id="catAddTrigger">+ Add category</div>`;
+  slot.querySelector("#catAddTrigger").addEventListener("click", function(){
+    const color = nextPaletteColor();
+    slot.innerHTML = `<div class="inline-add-row"><span class="dot" style="background:${color}"></span>
+      <input placeholder="Category name…" id="catAddInput">
+      <button class="btn btn-sm" id="catAddSave">Add</button></div>`;
+    const input = slot.querySelector("#catAddInput");
+    input.focus();
+    const submit = ()=>{
+      const name = input.value.trim();
+      if(!name) return;
+      const c = {id:uid(), name, color, tasks:[], groups:[]};
+      state.tasks.push(c); checklistState.activeCat = c.id; save(); renderChecklist();
+    };
+    input.addEventListener("keydown", e=>{
+      if(e.key==="Enter") submit();
+      if(e.key==="Escape") renderChecklist();
+    });
+    slot.querySelector("#catAddSave").addEventListener("click", submit);
+  });
+}
+
+/* ===================== MARKS ===================== */
+let marksState = { year: null, mode: "overview", subjectId: null };
+function markYear(m){ return (m.date||todayISO()).slice(0,4); }
+function availableYears(){
+  const years = new Set(state.marks.map(markYear));
+  years.add(todayISO().slice(0,4));
+  return [...years].sort();
+}
+function ensureMarkYear(){
+  const years = availableYears();
+  if(!marksState.year || !years.includes(marksState.year)) marksState.year = years[years.length-1];
+  return years;
+}
+function subjectWeightedAvg(subjectId, year){
+  const entries = state.marks.filter(m=>m.subjectId===subjectId && m.score!=null && (!year || markYear(m)===year));
+  if(!entries.length) return null;
+  const weights = entries.map(e=>e.weight||1);
+  const sumW = weights.reduce((a,b)=>a+b,0);
+  return entries.reduce((a,e,i)=>a + (e.score/e.outOf*100)*weights[i], 0) / sumW;
+}
+function stdDev(nums){
+  if(nums.length<2) return 0;
+  const mean = nums.reduce((a,b)=>a+b,0)/nums.length;
+  return Math.sqrt(nums.reduce((a,b)=>a+(b-mean)**2,0)/nums.length);
+}
+function renderMarks(){
+  const years = ensureMarkYear();
+  document.getElementById("yearTabs").innerHTML = years.map(y=>
+    `<button class="${marksState.year===y?'active':''}" data-year="${y}">${y}</button>`).join("");
+  document.getElementById("yearTabs").querySelectorAll("button").forEach(b=>
+    b.addEventListener("click", ()=>{ marksState.year=b.dataset.year; renderMarks(); }));
+
+  renderNextAssessCard();
+
+  const subjAvgs = state.subjects.map(s=>({s, avg: subjectWeightedAvg(s.id, marksState.year)})).filter(x=>x.avg!=null);
+  const overall = subjAvgs.length ? subjAvgs.reduce((a,x)=>a+x.avg,0)/subjAvgs.length : null;
+  const spread = subjAvgs.length ? stdDev(subjAvgs.map(x=>x.avg)) : null;
+  const withBenchmark = subjAvgs.filter(x=> state.benchmarks[x.s.id]!=null);
+  const avgDelta = withBenchmark.length ? withBenchmark.reduce((a,x)=>a+(x.avg-state.benchmarks[x.s.id]),0)/withBenchmark.length : null;
+
+  document.getElementById("markSummary").innerHTML = `
+    <div class="card stat-card"><div class="stat-num" style="font-family:var(--mono);">${overall==null?'—':overall.toFixed(1)+'%'}</div><div class="stat-label">Overall average</div></div>
+    <div class="card stat-card"><div class="stat-num" style="font-family:var(--mono);">${spread==null?'—':'±'+spread.toFixed(1)}</div><div class="stat-label">Spread across subjects</div></div>
+    <div class="card stat-card"><div class="stat-num" style="font-family:var(--mono); color:${avgDelta==null?'var(--text)':avgDelta>=0?'var(--success)':'var(--danger)'};">${avgDelta==null?'—':(avgDelta>=0?'+':'')+avgDelta.toFixed(1)}</div><div class="stat-label">Avg. vs benchmark</div></div>
+    <div class="card stat-card"><div class="stat-num" style="font-family:var(--mono);">${state.marks.filter(m=>markYear(m)===marksState.year).length}</div><div class="stat-label">Marks logged (${marksState.year})</div></div>`;
+
+  const body = document.getElementById("marksBody");
+  if(marksState.mode === "subject" && marksState.subjectId) renderSubjectDetail(body);
+  else renderMarkBars(body);
+}
+function renderMarkBars(body){
+  body.innerHTML = `<div class="card">${
+    state.subjects.map(s=>{
+      const avg = subjectWeightedAvg(s.id, marksState.year);
+      const bench = state.benchmarks[s.id];
+      return `<div class="mark-bar-row" data-subj-bar="${s.id}">
+        <div class="mark-bar-name"><span class="dot" style="background:${s.color}"></span>${escapeHtml(s.name)}</div>
+        <div class="mark-bar-track">
+          <div class="mark-bar-fill" style="width:${avg==null?0:avg}%; background:${s.color};"></div>
+          ${bench!=null?`<div class="mark-bar-benchmark" style="left:calc(${bench}% - 1px);" title="Benchmark: ${bench}%"></div>`:''}
+        </div>
+        <div class="mark-bar-val">${avg==null?'—':avg.toFixed(1)+'%'}</div>
+        <div class="mark-bar-chevron">${icon('<path d="M9 18l6-6-6-6"/>',15)}</div>
+      </div>`;
+    }).join("") || `<div class="empty">Add subjects in Settings to start tracking marks.</div>`
+  }</div>`;
+  body.querySelectorAll("[data-subj-bar]").forEach(el=> el.addEventListener("click", ()=>{
+    marksState.mode = "subject"; marksState.subjectId = el.dataset.subjBar; renderMarks();
+  }));
+}
+function renderSubjectDetail(body){
+  const subj = subjectById(marksState.subjectId);
+  if(!subj){ marksState.mode="overview"; renderMarkBars(body); return; }
+  const entries = state.marks.filter(m=>m.subjectId===subj.id && markYear(m)===marksState.year).sort((a,b)=>a.date.localeCompare(b.date));
+  const avg = subjectWeightedAvg(subj.id, marksState.year);
+  const bench = state.benchmarks[subj.id];
+  const delta = (avg!=null && bench!=null) ? avg-bench : null;
+
+  body.innerHTML = `
+    <div class="subj-detail-head">
+      <div class="subj-back" id="subjBackBtn">${icon('<path d="M15 18l-6-6 6-6"/>',15)} All subjects</div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+        <span class="dot" style="background:${subj.color}; width:12px; height:12px;"></span>
+        <div style="font-size:17px; font-weight:700; color:var(--text);">${escapeHtml(subj.name)}</div>
+        <button class="btn btn-sm" id="subjAddMarkBtn" style="margin-left:auto;">+ Add mark</button>
+      </div>
+      <div class="benchmark-row">
+        <div class="benchmark-stat"><div class="v">${avg==null?'—':avg.toFixed(1)+'%'}</div><div class="l">Weighted average</div></div>
+        <div class="benchmark-stat"><div class="v" style="color:${delta==null?'var(--text)':delta>=0?'var(--success)':'var(--danger)'};">${delta==null?'—':(delta>=0?'+':'')+delta.toFixed(1)}</div><div class="l">vs benchmark</div></div>
+        <div class="benchmark-input-wrap"><label class="field" style="margin-bottom:0;">Benchmark %<input class="input" type="number" min="0" max="100" id="benchInput" value="${bench??''}" placeholder="e.g. 85"></label></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="section-title">Marks over time</div>
+      <div id="markLineChart"></div>
+    </div>
+    <div class="card"><div id="subjMarksTable"></div></div>`;
+
+  document.getElementById("subjBackBtn").addEventListener("click", ()=>{ marksState.mode="overview"; renderMarks(); });
+  document.getElementById("subjAddMarkBtn").addEventListener("click", (e)=> openMarkModal(null, e.currentTarget, subj.id));
+  document.getElementById("benchInput").addEventListener("change", e=>{
+    const v = e.target.value===""? null : Number(e.target.value);
+    if(v==null) delete state.benchmarks[subj.id]; else state.benchmarks[subj.id]=v;
+    save(); renderMarks();
+  });
+
+  renderMarkLineChart(document.getElementById("markLineChart"), entries, bench, subj.color);
+
+  const table = document.getElementById("subjMarksTable");
+  if(!entries.length){ table.innerHTML = `<div class="empty">No marks logged for ${escapeHtml(subj.name)} in ${marksState.year} yet.</div>`; }
+  else {
+    table.innerHTML = `<table class="marks-table"><thead><tr><th>Assessment</th><th>Date</th><th>Score</th><th>Weight</th><th></th></tr></thead><tbody>
+      ${[...entries].reverse().map(m=>{
+        const upcoming = m.score==null;
+        const pct = !upcoming ? (m.score/m.outOf*100) : null;
+        const badgeClass = upcoming ? 'badge-muted' : pct>=85?'badge-success':pct>=70?'badge-warn':'badge-danger';
+        return `<tr>
+          <td>${escapeHtml(m.name)}</td>
+          <td>${m.date}</td>
+          <td>${upcoming?`<span class="badge badge-muted">Upcoming</span>`:`<span class="badge ${badgeClass}">${m.score}/${m.outOf} (${pct.toFixed(0)}%)</span>`}</td>
+          <td>${m.weight||1}</td>
+          <td><button class="iconbtn" data-edit-mark="${m.id}">${icon('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',14)}</button>
+              <button class="iconbtn" data-del-mark="${m.id}">${icon('<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',14)}</button></td>
+        </tr>`;
+      }).join("")}
+    </tbody></table>`;
+    table.querySelectorAll("[data-edit-mark]").forEach(el=> el.addEventListener("click", ()=> openMarkModal(el.dataset.editMark, el, subj.id)));
+    table.querySelectorAll("[data-del-mark]").forEach(el=> el.addEventListener("click", ()=>{
+      if(confirm("Delete this entry?")){ state.marks = state.marks.filter(m=>m.id!==el.dataset.delMark); save(); renderMarks(); }
+    }));
+  }
+}
+function renderMarkLineChart(el, entries, bench, color){
+  const scored = entries.filter(m=>m.score!=null);
+  if(scored.length<2){ el.innerHTML = `<div class="empty">Need at least 2 scored assessments to chart a trend.</div>`; return; }
+  const w=560,h=200,pad=32;
+  const step = (w-pad*2)/(scored.length-1);
+  const pts = scored.map((m,i)=>({ x: pad+i*step, y: h-24-((m.score/m.outOf*100)/100)*(h-56) }));
+  let running = [];
+  const avgPts = scored.map((m,i)=>{
+    running.push(m.score/m.outOf*100);
+    const a = running.reduce((x,y)=>x+y,0)/running.length;
+    return { x: pad+i*step, y: h-24-(a/100)*(h-56) };
+  });
+  const path = pts.map((p,i)=>(i===0?"M":"L")+p.x.toFixed(1)+","+p.y.toFixed(1)).join(" ");
+  const avgPath = avgPts.map((p,i)=>(i===0?"M":"L")+p.x.toFixed(1)+","+p.y.toFixed(1)).join(" ");
+  const benchY = bench!=null ? h-24-(bench/100)*(h-56) : null;
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto;">
+    <line x1="${pad}" y1="${h-24}" x2="${w-pad}" y2="${h-24}" stroke="var(--border)"/>
+    ${benchY!=null?`<line x1="${pad}" y1="${benchY.toFixed(1)}" x2="${w-pad}" y2="${benchY.toFixed(1)}" stroke="var(--text-faint)" stroke-dasharray="4 4"/>`:''}
+    <path d="${avgPath}" fill="none" stroke="var(--text-faint)" stroke-width="1.5" stroke-dasharray="2 3"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5"/>
+    ${pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" fill="${color}"/>`).join("")}
+  </svg>
+  <div class="chart-legend"><span><span class="dot" style="background:${color}"></span>Score</span><span><span class="dot" style="background:var(--text-faint)"></span>Running average</span>${bench!=null?`<span><span class="dot" style="background:var(--text-faint); opacity:.5;"></span>Benchmark</span>`:''}</div>`;
+}
+function renderNextAssessCard(){
+  const upcoming = state.marks.filter(m=>m.score==null && m.date>=todayISO()).sort((a,b)=>a.date.localeCompare(b.date));
+  const card = document.getElementById("nextAssessCard");
+  if(!upcoming.length){ card.innerHTML = ""; return; }
+  const next = upcoming[0];
+  const subj = subjectById(next.subjectId);
+  const days = daysBetween(todayISO(), next.date);
+  card.innerHTML = `<div class="card next-assess-card">
+    <div><div class="next-assess-num">${days}</div><div class="next-assess-unit">day${days===1?'':'s'}</div></div>
+    <div style="flex:1;">
+      <div style="font-size:15px; font-weight:700; color:var(--text); display:flex; align-items:center; gap:8px;"><span class="dot" style="background:${subj?subj.color:'#aaa'}"></span>${escapeHtml(next.name)}</div>
+      <div style="font-size:12.5px; color:var(--text-dim); margin-top:2px;">${escapeHtml(subj?subj.name:'')} · ${days===0?'Today':days===1?'Tomorrow':next.date}</div>
+    </div>
+    ${upcoming.length>1?`<div class="badge badge-muted">+${upcoming.length-1} more upcoming</div>`:''}
+  </div>`;
+}
+document.getElementById("markAddBtn").addEventListener("click", (e)=> openMarkModal(null, e.currentTarget, marksState.mode==="subject"?marksState.subjectId:null));
+function openMarkModal(markId, anchor, presetSubjectId){
+  const editing = markId ? state.marks.find(m=>m.id===markId) : null;
+  const body = `
+    <label class="field">Subject
+      <select class="input" id="mfSubject">${state.subjects.map(s=>`<option value="${s.id}" ${(editing?editing.subjectId===s.id:presetSubjectId===s.id)?'selected':''}>${escapeHtml(s.name)}</option>`).join("")}</select>
+    </label>
+    <label class="field">Assessment name<input class="input" id="mfName" value="${editing?escapeHtml(editing.name):''}" placeholder="e.g. Topic 3 test"></label>
+    <div class="row">
+      <label class="field">Date<input class="input" type="date" id="mfDate" value="${editing?editing.date:todayISO()}"></label>
+      <label class="field">Weight<input class="input" type="number" step="0.1" min="0" id="mfWeight" value="${editing?(editing.weight||1):1}"></label>
+    </div>
+    <div class="row">
+      <label class="field">Score <span style="font-weight:400;">(leave blank if upcoming)</span><input class="input" type="number" step="0.1" id="mfScore" value="${editing&&editing.score!=null?editing.score:''}"></label>
+      <label class="field">Out of<input class="input" type="number" step="0.1" min="1" id="mfOutOf" value="${editing?editing.outOf:100}"></label>
+    </div>
+    <div class="modal-actions">
+      ${editing?'<button class="btn btn-danger" id="mfDelete">Delete</button>':''}
+      <button class="btn" id="mfCancel">Cancel</button><button class="btn btn-primary" id="mfSave">Save</button>
+    </div>`;
+  openPopover(anchor, editing?"Edit mark":"Add mark", body, root=>{
+    root.querySelector("#mfCancel").addEventListener("click", closePopover);
+    if(editing) root.querySelector("#mfDelete").addEventListener("click", ()=>{
+      state.marks = state.marks.filter(m=>m.id!==editing.id); save(); closePopover(); renderMarks();
+    });
+    root.querySelector("#mfSave").addEventListener("click", ()=>{
+      const name = root.querySelector("#mfName").value.trim();
+      if(!name){ toast("Give the assessment a name"); return; }
+      const scoreRaw = root.querySelector("#mfScore").value;
+      const rec = {
+        id: editing?editing.id:uid(),
+        subjectId: root.querySelector("#mfSubject").value,
+        name, date: root.querySelector("#mfDate").value || todayISO(),
+        weight: Number(root.querySelector("#mfWeight").value)||1,
+        outOf: Number(root.querySelector("#mfOutOf").value)||100,
+        score: scoreRaw===""? null : Number(scoreRaw)
+      };
+      if(editing){ Object.assign(editing, rec); } else { state.marks.push(rec); }
+      save(); closePopover(); renderMarks(); renderOverview();
+    });
+  });
+}
+
+/* ===================== ANALYTICS ===================== */
+function renderAnalytics(){
+  renderWeekChart();
+  renderGoalProgress();
+  renderTrendChart();
+  renderTaskDonut();
+  renderHeatmap();
+}
+function renderWeekChart(){
+  const days = [];
+  for(let i=6;i>=0;i--) days.push(addDays(todayISO(), -i));
+  const w=440,h=180,pad=26, barW = (w-pad*2)/7*0.6, gap=(w-pad*2)/7;
+  const maxMin = Math.max(60, ...days.map(d=>minutesOnDate(d)));
+  let svg = `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto;">`;
+  days.forEach((d,i)=>{
+    const bySubj = {};
+    state.sessions.filter(s=>s.date===d).forEach(s=>{ bySubj[s.subjectId||"none"] = (bySubj[s.subjectId||"none"]||0)+s.minutes; });
+    const total = Object.values(bySubj).reduce((a,b)=>a+b,0);
+    let yCursor = h-30;
+    const x = pad + i*gap + (gap-barW)/2;
+    Object.entries(bySubj).forEach(([sid,min])=>{
+      const subj = subjectById(sid);
+      const barH = (min/maxMin)*(h-60);
+      yCursor -= barH;
+      svg += `<rect x="${x.toFixed(1)}" y="${yCursor.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" fill="${subj?subj.color:'#94a3b8'}" rx="2"/>`;
+    });
+    svg += `<text x="${(x+barW/2).toFixed(1)}" y="${h-12}" font-size="10" text-anchor="middle" fill="var(--text-faint)">${new Date(d+"T00:00:00").toLocaleDateString(undefined,{weekday:'short'})}</text>`;
+    if(total>0) svg += `<text x="${(x+barW/2).toFixed(1)}" y="${(yCursor-5).toFixed(1)}" font-size="9" text-anchor="middle" fill="var(--text-dim)">${total}m</text>`;
+  });
+  svg += `</svg>`;
+  document.getElementById("chartWeek").innerHTML = svg;
+  document.getElementById("chartWeekLegend").innerHTML = state.subjects.map(s=>`<span><span class="dot" style="background:${s.color}"></span>${escapeHtml(s.name)}</span>`).join("");
+}
+function renderGoalProgress(){
+  const weekStart = addDays(todayISO(), -6);
+  const el = document.getElementById("goalProgress");
+  const withGoals = state.subjects.filter(s=> state.goals[s.id] && Number(state.goals[s.id])>0);
+  if(!withGoals.length){ el.innerHTML = `<div class="empty">Set weekly goals in Settings to see progress here.</div>`; return; }
+  el.innerHTML = withGoals.map(s=>{
+    const minutes = state.sessions.filter(sess=>sess.subjectId===s.id && sess.date>=weekStart).reduce((a,x)=>a+x.minutes,0);
+    const goalMin = Number(state.goals[s.id])*60;
+    const pct = Math.min(100, Math.round(minutes/goalMin*100));
+    return `<div style="margin-bottom:12px;">
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:4px;">
+        <span><span class="dot" style="background:${s.color}"></span> ${escapeHtml(s.name)}</span>
+        <span style="color:var(--text-dim);">${fmtHM(minutes)} / ${state.goals[s.id]}h</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="width:${pct}%; background:${s.color};"></div></div>
+    </div>`;
+  }).join("");
+}
+function renderTrendChart(){
+  const sel = document.getElementById("trendSubject");
+  if(!sel.dataset.wired){
+    sel.addEventListener("change", renderTrendChart);
+    sel.dataset.wired = "1";
+  }
+  sel.innerHTML = state.subjects.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+  const subjId = sel.value;
+  const entries = state.marks.filter(m=>m.subjectId===subjId && m.score!=null).sort((a,b)=>a.date.localeCompare(b.date));
+  const box = document.getElementById("chartTrend");
+  if(entries.length<2){ box.innerHTML = `<div class="empty">Need at least 2 scored assessments for this subject.</div>`; return; }
+  const w=440,h=180,pad=30;
+  const pts = entries.map((e,i)=> ({ x: pad + i*((w-pad*2)/(entries.length-1)), y: h-20-((e.score/e.outOf*100)/100)*(h-50), pct: e.score/e.outOf*100 }));
+  const path = pts.map((p,i)=> (i===0?"M":"L")+p.x.toFixed(1)+","+p.y.toFixed(1)).join(" ");
+  const subj = subjectById(subjId);
+  let svg = `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto;">
+    <line x1="${pad}" y1="${h-20}" x2="${w-pad}" y2="${h-20}" stroke="var(--border)"/>
+    <path d="${path}" fill="none" stroke="${subj?subj.color:'#6366f1'}" stroke-width="2.5"/>
+    ${pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" fill="${subj?subj.color:'#6366f1'}"/>`).join("")}
+  </svg>`;
+  box.innerHTML = svg;
+}
+function renderTaskDonut(){
+  const all = allTasks();
+  const done = all.filter(t=>t.done).length, total = all.length;
+  const pct = total? Math.round(done/total*100):0;
+  const r=42, c=2*Math.PI*r;
+  const svg = `<svg width="100" height="100" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="12"/>
+    <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--accent)" stroke-width="12" stroke-linecap="round"
+      stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c*(1-pct/100)).toFixed(1)}" transform="rotate(-90 50 50)"/>
+    <text x="50" y="55" text-anchor="middle" font-size="18" font-weight="700" fill="var(--text)">${pct}%</text>
+  </svg>`;
+  document.getElementById("taskDonut").innerHTML = `${svg}<div><div class="stat-num" style="font-size:20px;">${done}/${total}</div><div class="stat-label">Tasks completed</div></div>`;
+}
+function renderHeatmap(){
+  const days = [];
+  for(let i=90;i>=0;i--) days.push(addDays(todayISO(), -i));
+  const maxMin = Math.max(1, ...days.map(minutesOnDate));
+  document.getElementById("heatGrid").innerHTML = days.map(d=>{
+    const min = minutesOnDate(d);
+    const alpha = min===0? 0 : 0.25 + 0.75*Math.min(1,min/maxMin);
+    const bg = min===0 ? "var(--surface-2)" : `color-mix(in srgb, var(--accent) ${Math.round(alpha*100)}%, var(--surface-2))`;
+    return `<div class="heat-cell" title="${d}: ${min}m" style="background:${bg}"></div>`;
+  }).join("");
+}
+
+/* ===================== SETTINGS ===================== */
+function renderSettings(){
+  document.getElementById("subjList").innerHTML = state.subjects.map(s=>`
+    <div class="subj-row">
+      <input type="color" class="color-input" value="${s.color}" data-subj-color="${s.id}">
+      <input class="input" value="${escapeHtml(s.name)}" data-subj-name="${s.id}">
+      <button class="iconbtn" data-subj-del="${s.id}">${icon('<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>')}</button>
+    </div>`).join("");
+  document.getElementById("subjList").querySelectorAll("[data-subj-color]").forEach(el=> el.addEventListener("input", e=>{
+    subjectById(el.dataset.subjColor).color = e.target.value; save(); renderTimetable(); renderSettings();
+  }));
+  document.getElementById("subjList").querySelectorAll("[data-subj-name]").forEach(el=> el.addEventListener("change", e=>{
+    subjectById(el.dataset.subjName).name = e.target.value.trim() || "Untitled"; save();
+  }));
+  document.getElementById("subjList").querySelectorAll("[data-subj-del]").forEach(el=> el.addEventListener("click", ()=>{
+    const id = el.dataset.subjDel; const subj = subjectById(id);
+    const uses = state.timetable.filter(p=>p.subjectId===id).length + state.marks.filter(m=>m.subjectId===id).length + state.sessions.filter(s=>s.subjectId===id).length;
+    if(confirm(`Delete "${subj.name}"?${uses?` It's referenced in ${uses} record(s), which will show as "Unknown subject".`:''}`)){
+      state.subjects = state.subjects.filter(s=>s.id!==id); delete state.goals[id]; save(); renderSettings();
+    }
+  }));
+  wireInlineAddSubject();
+
+  document.getElementById("goalList").innerHTML = state.subjects.map(s=>`
+    <div class="goal-row"><span class="dot" style="background:${s.color}"></span><span style="flex:1; font-size:13px;">${escapeHtml(s.name)}</span>
+      <input class="input" type="number" min="0" step="0.5" value="${state.goals[s.id]||''}" placeholder="0" data-goal="${s.id}"> h/wk</div>`).join("");
+  document.getElementById("goalList").querySelectorAll("[data-goal]").forEach(el=> el.addEventListener("change", e=>{
+    state.goals[el.dataset.goal] = Number(e.target.value)||0; save();
+  }));
+
+  document.getElementById("setWork").value = state.settings.pomodoroWork;
+  document.getElementById("setShort").value = state.settings.pomodoroShort;
+  document.getElementById("setLong").value = state.settings.pomodoroLong;
+  document.getElementById("setInterval").value = state.settings.longBreakInterval;
+}
+function wireInlineAddSubject(){
+  const list = document.getElementById("subjList");
+  let slot = document.getElementById("subjAddSlot");
+  if(!slot){ slot = document.createElement("div"); slot.id = "subjAddSlot"; list.after(slot); }
+  slot.innerHTML = `<div class="inline-add-trigger" id="subjAddTrigger">+ Add subject</div>`;
+  slot.querySelector("#subjAddTrigger").addEventListener("click", function(){
+    const color = nextPaletteColor();
+    slot.innerHTML = `<div class="inline-add-row"><span class="dot" style="background:${color}"></span>
+      <input placeholder="Subject name…" id="subjAddInput">
+      <button class="btn btn-sm" id="subjAddSave">Add</button></div>`;
+    const input = slot.querySelector("#subjAddInput");
+    input.focus();
+    const submit = ()=>{
+      const name = input.value.trim();
+      if(!name) return;
+      state.subjects.push({id:uid(), name, color}); save(); renderSettings();
+    };
+    input.addEventListener("keydown", e=>{
+      if(e.key==="Enter") submit();
+      if(e.key==="Escape") renderSettings();
+    });
+    slot.querySelector("#subjAddSave").addEventListener("click", submit);
+  });
+}
+["setWork","setShort","setLong","setInterval"].forEach(id=>{
+  document.getElementById(id).addEventListener("change", e=>{
+    const v = Math.max(1, Number(e.target.value)||1);
+    if(id==="setWork") state.settings.pomodoroWork=v;
+    if(id==="setShort") state.settings.pomodoroShort=v;
+    if(id==="setLong") state.settings.pomodoroLong=v;
+    if(id==="setInterval") state.settings.longBreakInterval=v;
+    save();
+  });
+});
+document.getElementById("exportBtn").addEventListener("click", ()=>{
+  const blob = new Blob([JSON.stringify(state,null,2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = `study-dashboard-backup-${todayISO()}.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+});
+document.getElementById("importBtn").addEventListener("click", ()=> document.getElementById("importFile").click());
+document.getElementById("importFile").addEventListener("change", e=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const parsed = JSON.parse(reader.result);
+      if(!parsed.subjects || !parsed.tasks) throw new Error("bad shape");
+      if(confirm("This will replace all current data with the backup. Continue?")){
+        state = Object.assign(defaultState(), parsed, {settings: Object.assign({}, defaultState().settings, parsed.settings||{})});
+        save(); location.reload();
+      }
+    }catch(err){ toast("Couldn't read that file — is it a valid backup?"); }
+  };
+  reader.readAsText(file);
+  e.target.value = "";
+});
+document.getElementById("resetBtn").addEventListener("click", ()=>{
+  if(confirm("This will permanently delete all local data. Are you sure?") && confirm("Really sure? This cannot be undone.")){
+    localStorage.removeItem(KEY); location.reload();
+  }
+});
+
+/* ===================== init ===================== */
+function init(){
+  renderNav();
+  applyTheme();
+  const startTab = state.settings.lastTab || "overview";
+  switchTab(startTab);
+  setInterval(()=>{
+    if(document.getElementById("tab-timetable").classList.contains("active")) renderTimetable();
+    if(document.getElementById("tab-overview").classList.contains("active")) renderOverview();
+  }, 30000);
+}
+init();
+
+if("serviceWorker" in navigator){
+  window.addEventListener("load", ()=>{
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+
+})();
+</script>
+</body>
+</html>
