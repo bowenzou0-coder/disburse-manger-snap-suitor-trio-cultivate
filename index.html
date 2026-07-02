@@ -678,20 +678,35 @@ function hasMeaningfulData(){
     || state.marks.length>0 || state.sessions.length>0 || state.timetable.length>0
     || (state.notes && state.notes.trim().length>0);
 }
-function initSync(){
+async function initSync(){
   if(!syncCfg || !syncCfg.url || !syncCfg.anonKey) return;
   if(typeof window.supabase==="undefined"){ syncStatus="error"; return; }
   try{
-    sb = window.supabase.createClient(syncCfg.url, syncCfg.anonKey);
+    // detectSessionInUrl off: we exchange the PKCE code ourselves below, explicitly,
+    // so a failure surfaces as a real error instead of silently doing nothing.
+    sb = window.supabase.createClient(syncCfg.url, syncCfg.anonKey, { auth: { detectSessionInUrl:false, flowType:"pkce" } });
   }catch(e){ syncStatus="error"; return; }
   sb.auth.onAuthStateChange((event, session)=>{
     syncSession = session;
-    if(event==="SIGNED_IN" || (event==="INITIAL_SESSION" && session)){
-      if(window.location.hash.includes("access_token")) history.replaceState(null, "", window.location.pathname+window.location.search);
-      handleSignedIn();
-    }
+    if(event==="SIGNED_IN" || (event==="INITIAL_SESSION" && session)) handleSignedIn();
     if(event==="SIGNED_OUT"){ syncSession=null; syncStatus="idle"; if(document.getElementById("syncPanel")) renderSyncPanel(); }
   });
+
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const authErr = params.get("error_description");
+  if(authErr){
+    toast("Sign-in link error: "+decodeURIComponent(authErr));
+    history.replaceState(null, "", window.location.pathname);
+  } else if(code){
+    history.replaceState(null, "", window.location.pathname);
+    const { error } = await sb.auth.exchangeCodeForSession(code);
+    if(error) toast("Couldn't complete sign-in: "+error.message);
+  } else {
+    // no link/code in the URL — just restore any existing session as usual
+    const { data } = await sb.auth.getSession();
+    if(data.session){ syncSession = data.session; handleSignedIn(); }
+  }
 }
 async function handleSignedIn(){
   syncStatus = "checking";
