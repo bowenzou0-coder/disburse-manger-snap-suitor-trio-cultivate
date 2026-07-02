@@ -744,10 +744,38 @@ function closeModal(){
 }
 
 /* ===================== timetable import (CSV / ICS) ===================== */
-let importState = { rows: [] };
+let importState = { rows: [], subjectMap: {} };
 function findSubjectByName(name){
   const n = (name||"").trim().toLowerCase();
   return state.subjects.find(s=> s.name.trim().toLowerCase()===n);
+}
+const SUBJ_WORD_EXPAND = {
+  maths:"mathematics", math:"mathematics", ext:"extension", adv:"advanced",
+  eng:"english", bio:"biology", chem:"chemistry", econ:"economics", lit:"literature", phys:"physics"
+};
+function subjectNameWords(name){
+  let t = (name||"").toLowerCase().trim();
+  t = t.replace(/^(yr|year)\s*\d+\s*/,"");
+  t = t.replace(/[^a-z0-9\s]/g," ");
+  return t.split(/\s+/).filter(Boolean).map(w=> SUBJ_WORD_EXPAND[w]||w);
+}
+function subjectWordSimilarity(wordsA, wordsB){
+  const a = new Set(wordsA), b = new Set(wordsB);
+  const inter = [...a].filter(w=>b.has(w)).length;
+  const union = new Set([...a,...b]).size;
+  return union ? inter/union : 0;
+}
+// Suggests the closest existing subject for an imported name that doesn't match exactly
+// (e.g. "Yr 11 Mathematics Extension" -> your existing "Maths Ext 1"), so imports map
+// onto subjects you already track instead of spawning near-duplicates.
+function suggestSubjectMatch(name){
+  const words = subjectNameWords(name);
+  let best = null, bestScore = 0;
+  state.subjects.forEach(s=>{
+    const score = subjectWordSimilarity(words, subjectNameWords(s.name));
+    if(score > bestScore){ bestScore = score; best = s; }
+  });
+  return bestScore >= 0.4 ? best : null;
 }
 function splitCsvLine(line){
   const out = []; let cur = "", inQ = false;
@@ -898,7 +926,15 @@ function runImportParse(text, filename, root){
   const isICS = /^BEGIN:VCALENDAR/im.test(text) || /\.ics$/i.test(filename);
   const result = isICS ? parseICS(text) : parseCSV(text);
   importState.rows = result.rows.map(r=> ({...r, include: !r.error}));
+  importState.subjectMap = {};
+  [...new Set(importState.rows.filter(r=>!r.error && !findSubjectByName(r.subject)).map(r=>r.subject.trim()))].forEach(name=>{
+    const suggestion = suggestSubjectMatch(name);
+    importState.subjectMap[name] = suggestion ? suggestion.id : "new";
+  });
   renderImportPreview(root, result.error);
+}
+function importResolvedCount(){
+  return importState.rows.filter(r=> !r.error && r.include && importState.subjectMap[r.subject.trim()]!=="skip").length;
 }
 function renderImportPreview(root, topError){
   const wrap = root.querySelector("#impPreviewWrap");
@@ -906,20 +942,33 @@ function renderImportPreview(root, topError){
   if(topError){ wrap.innerHTML = `<hr class="sep"><div class="empty" style="color:var(--danger);">${escapeHtml(topError)}</div>`; return; }
   const rows = importState.rows;
   const validCount = rows.filter(r=>!r.error).length;
-  const newSubjects = [...new Set(rows.filter(r=>!r.error && !findSubjectByName(r.subject)).map(r=>r.subject.trim()))];
+  const unmatchedNames = Object.keys(importState.subjectMap);
   wrap.innerHTML = `
     <hr class="sep">
     <div style="font-size:12.5px; color:var(--text-dim); margin-bottom:8px;">
       Found ${rows.length} row${rows.length===1?"":"s"} — ${validCount} usable${rows.length-validCount>0?`, ${rows.length-validCount} skipped`:""}.
-      ${newSubjects.length?` ${newSubjects.length} new subject${newSubjects.length===1?"":"s"} will be created: ${newSubjects.map(escapeHtml).join(", ")}.`:""}
     </div>
+    ${unmatchedNames.length ? `
+    <div style="font-size:12.5px; font-weight:600; color:var(--text); margin-bottom:6px;">Map imported subjects</div>
+    <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:14px;">
+      ${unmatchedNames.map(name=> `
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div style="flex:1; font-size:12.5px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(name)}</div>
+          <select class="input" style="flex:1;" data-subj-map="${escapeHtml(name)}">
+            <option value="new" ${importState.subjectMap[name]==="new"?"selected":""}>Create new subject</option>
+            ${state.subjects.map(s=> `<option value="${s.id}" ${importState.subjectMap[name]===s.id?"selected":""}>Map to ${escapeHtml(s.name)}</option>`).join("")}
+            <option value="skip" ${importState.subjectMap[name]==="skip"?"selected":""}>Don't import these rows</option>
+          </select>
+        </div>
+      `).join("")}
+    </div>` : ""}
     <div style="max-height:220px; overflow:auto;">
     <table class="import-table"><thead><tr><th></th><th>Day</th><th>Subject</th><th>Start</th><th>End</th><th>Room</th></tr></thead><tbody>
       ${rows.map((r,i)=> r.error ? `
         <tr class="row-error"><td></td><td colspan="5">${escapeHtml(r.error)}${r.raw?` — "${escapeHtml(r.raw)}"`:""}</td></tr>
       ` : `
         <tr><td><input type="checkbox" data-imp-row="${i}" ${r.include?"checked":""}></td>
-          <td>${DAYS[r.day]}</td><td>${escapeHtml(r.subject)}${!findSubjectByName(r.subject)?' <span class="badge badge-accent">new</span>':""}</td>
+          <td>${DAYS[r.day]}</td><td>${escapeHtml(r.subject)}</td>
           <td>${r.start}</td><td>${r.end}</td><td>${escapeHtml(r.room||"—")}</td></tr>
       `).join("")}
     </tbody></table>
@@ -930,11 +979,16 @@ function renderImportPreview(root, topError){
     </div>
     <div class="modal-actions">
       <button class="btn" id="impCancel2">Cancel</button>
-      <button class="btn btn-primary" id="impCommit">Import ${validCount} period${validCount===1?"":"s"}</button>
+      <button class="btn btn-primary" id="impCommit">Import ${importResolvedCount()} period${importResolvedCount()===1?"":"s"}</button>
     </div>
   `;
   wrap.querySelectorAll("[data-imp-row]").forEach(cb=> cb.addEventListener("change", e=>{
     importState.rows[Number(e.target.dataset.impRow)].include = e.target.checked;
+    wrap.querySelector("#impCommit").textContent = `Import ${importResolvedCount()} period${importResolvedCount()===1?"":"s"}`;
+  }));
+  wrap.querySelectorAll("[data-subj-map]").forEach(sel=> sel.addEventListener("change", e=>{
+    importState.subjectMap[e.target.dataset.subjMap] = e.target.value;
+    wrap.querySelector("#impCommit").textContent = `Import ${importResolvedCount()} period${importResolvedCount()===1?"":"s"}`;
   }));
   wrap.querySelector("#impCancel2").addEventListener("click", closeModal);
   wrap.querySelector("#impCommit").addEventListener("click", ()=>{
@@ -943,14 +997,17 @@ function renderImportPreview(root, topError){
   });
 }
 function commitImport(mode){
-  const toAdd = importState.rows.filter(r=>!r.error && r.include);
+  const toAdd = importState.rows.filter(r=> !r.error && r.include && importState.subjectMap[r.subject.trim()]!=="skip");
   if(!toAdd.length){ toast("Nothing selected to import"); return; }
   if(mode==="replace") state.timetable = [];
   const createdByName = {};
   toAdd.forEach(r=>{
-    const key = r.subject.trim().toLowerCase();
-    let subj = findSubjectByName(r.subject) || createdByName[key];
-    if(!subj){ subj = {id:uid(), name:r.subject.trim(), color: nextPaletteColor()}; state.subjects.push(subj); createdByName[key] = subj; }
+    const key = r.subject.trim();
+    const mapped = importState.subjectMap[key];
+    let subj;
+    if(mapped && mapped!=="new") subj = state.subjects.find(s=>s.id===mapped);
+    if(!subj) subj = findSubjectByName(r.subject) || createdByName[key.toLowerCase()];
+    if(!subj){ subj = {id:uid(), name:r.subject.trim(), color: nextPaletteColor()}; state.subjects.push(subj); createdByName[key.toLowerCase()] = subj; }
     state.timetable.push({ id:uid(), day:r.day, subjectId:subj.id, label:"", start:r.start, end:r.end, room:r.room||"", teacher:r.teacher||"" });
   });
   save(); closeModal(); renderTimetable();
