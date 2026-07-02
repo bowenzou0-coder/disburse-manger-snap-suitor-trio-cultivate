@@ -664,30 +664,88 @@ function icon(svgInner, size){ return `<svg viewBox="0 0 24 24" width="${size||1
 /* ===================== quick-add natural-language parsing ===================== */
 const QA_DOW_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const QA_WEEKDAYS = [
-  {re:/\b(mon|monday)\b/i, day:1}, {re:/\b(tues?|tuesday)\b/i, day:2}, {re:/\b(wed(nes)?|wednesday)\b/i, day:3},
-  {re:/\b(thur?s?|thursday)\b/i, day:4}, {re:/\b(fri|friday)\b/i, day:5}, {re:/\b(sat|saturday)\b/i, day:6}, {re:/\b(sun|sunday)\b/i, day:0},
+  {re:/(mon|monday)/i, day:1}, {re:/(tues?|tuesday)/i, day:2}, {re:/(wed(nes)?|wednesday)/i, day:3},
+  {re:/(thur?s?|thursday)/i, day:4}, {re:/(fri|friday)/i, day:5}, {re:/(sat|saturday)/i, day:6}, {re:/(sun|sunday)/i, day:0},
 ];
+const QA_MONTHS = {jan:0,january:0,feb:1,february:1,mar:2,march:2,apr:3,april:3,may:4,jun:5,june:5,jul:6,july:6,aug:7,august:7,sep:8,sept:8,september:8,oct:9,october:9,nov:10,november:10,dec:11,december:11};
 const QA_PRIORITY = [
   {re:/(!p1|!high|\basap\b|\burgent\b)/i, level:1, label:"High"},
   {re:/(!p2|!med(ium)?)/i, level:2, label:"Medium"},
   {re:/(!p3|!low)/i, level:3, label:"Low"},
 ];
+const QA_REPEAT_RE = /\b(!daily|every\s*day|everyday|daily)\b/i;
 function qaNextWeekday(targetDow){
   const cur = new Date().getDay();
   return addDays(todayISO(), (targetDow - cur + 7) % 7);
 }
+function qaFindWeekday(text){
+  // "next friday" always means the following week's Friday, skipping this week's
+  // occurrence entirely even if it hasn't happened yet — matches Todoist's convention.
+  for(const w of QA_WEEKDAYS){
+    const m = text.match(new RegExp("\\bnext\\s+"+w.re.source+"[a-z]*\\b", "i"));
+    if(m) return { day:w.day, match:m[0], label:QA_DOW_NAMES[w.day], forceNextWeek:true };
+  }
+  for(const w of QA_WEEKDAYS){
+    const m = text.match(new RegExp("\\b"+w.re.source+"\\b", "i"));
+    if(m) return { day:w.day, match:m[0], label:QA_DOW_NAMES[w.day], forceNextWeek:false };
+  }
+  return null;
+}
+function qaFindExplicitDate(text){
+  const thisYear = new Date().getFullYear();
+  const startOfToday = new Date(todayISO()+"T00:00:00");
+  function resolveYear(mon, day){
+    let d = new Date(thisYear, mon, day);
+    if(d < startOfToday) d = new Date(thisYear+1, mon, day);
+    return d;
+  }
+  let m = text.match(/\b(\d{1,2})[\/\-](\d{1,2})\b/);
+  if(m){
+    const day = +m[1], mon = +m[2]-1;
+    if(day>=1 && day<=31 && mon>=0 && mon<=11){
+      const d = resolveYear(mon, day);
+      return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
+    }
+  }
+  const monthNames = Object.keys(QA_MONTHS).join("|");
+  m = text.match(new RegExp(`\\b(${monthNames})\\s+(\\d{1,2})(st|nd|rd|th)?\\b`, "i"));
+  let day, monName;
+  if(m){ monName = m[1].toLowerCase(); day = +m[2]; }
+  else{
+    m = text.match(new RegExp(`\\b(\\d{1,2})(st|nd|rd|th)?\\s+(${monthNames})\\b`, "i"));
+    if(m){ day = +m[1]; monName = m[3].toLowerCase(); }
+  }
+  if(m && day>=1 && day<=31){
+    const mon = QA_MONTHS[monName];
+    const d = resolveYear(mon, day);
+    return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
+  }
+  return null;
+}
 function parseQuickAdd(raw){
-  let text = raw, due = null, dueLabel = null, priority = 0, priLabel = null;
+  let text = raw, due = null, dueLabel = null, priority = 0, priLabel = null, repeat = null;
+
+  const dailyMatch = text.match(QA_REPEAT_RE);
+  if(dailyMatch){ repeat = "daily"; text = text.replace(dailyMatch[0], ""); }
+
   if(/\btoday\b/i.test(text)){ due = todayISO(); dueLabel = "Today"; text = text.replace(/\btoday\b/i, ""); }
   else if(/\b(tomorrow|tmrw|tmr)\b/i.test(text)){ due = addDays(todayISO(),1); dueLabel = "Tomorrow"; text = text.replace(/\b(tomorrow|tmrw|tmr)\b/i, ""); }
   else if(/\bnext week\b/i.test(text)){ due = addDays(todayISO(),7); dueLabel = "Next week"; text = text.replace(/\bnext week\b/i, ""); }
   else {
+    const explicitDate = qaFindExplicitDate(text);
+    const eowMatch = text.match(/\b(eow|end of week)\b/i);
+    const weekendMatch = text.match(/\bthis weekend\b/i);
     const inDays = text.match(/\bin (\d+)\s*d(ays?)?\b/i);
-    if(inDays){ const n = Number(inDays[1]); due = addDays(todayISO(), n); dueLabel = `In ${n}d`; text = text.replace(inDays[0], ""); }
+    if(explicitDate){ due = explicitDate.due; dueLabel = explicitDate.label; text = text.replace(explicitDate.match, ""); }
+    else if(eowMatch){ due = qaNextWeekday(5); dueLabel = "Fri"; text = text.replace(eowMatch[0], ""); }
+    else if(weekendMatch){ due = qaNextWeekday(6); dueLabel = "Sat"; text = text.replace(weekendMatch[0], ""); }
+    else if(inDays){ const n = Number(inDays[1]); due = addDays(todayISO(), n); dueLabel = `In ${n}d`; text = text.replace(inDays[0], ""); }
     else{
-      for(const w of QA_WEEKDAYS){
-        const m = text.match(w.re);
-        if(m){ due = qaNextWeekday(w.day); dueLabel = QA_DOW_NAMES[w.day]; text = text.replace(w.re, ""); break; }
+      const wd = qaFindWeekday(text);
+      if(wd){
+        due = wd.forceNextWeek ? addDays(qaNextWeekday(wd.day), 7) : qaNextWeekday(wd.day);
+        dueLabel = wd.label;
+        text = text.replace(wd.match, "");
       }
     }
   }
@@ -696,11 +754,11 @@ function parseQuickAdd(raw){
     if(m){ priority = p.level; priLabel = p.label; text = text.replace(p.re, ""); break; }
   }
   text = text.replace(/\s{2,}/g, " ").trim();
-  return { title: text, due, dueLabel, priority, priLabel };
+  return { title: text, due, dueLabel, priority, priLabel, repeat };
 }
 function qaHintHtml(parsed){
-  if(!parsed.dueLabel && !parsed.priLabel) return "";
-  return `${parsed.dueLabel?`<span class="badge badge-accent">${parsed.dueLabel}</span>`:""}${parsed.priLabel?`<span class="badge ${parsed.priority===1?'badge-danger':parsed.priority===2?'badge-warn':'badge-muted'}">${parsed.priLabel}</span>`:""}`;
+  if(!parsed.dueLabel && !parsed.priLabel && !parsed.repeat) return "";
+  return `${parsed.dueLabel?`<span class="badge badge-accent">${parsed.dueLabel}</span>`:""}${parsed.priLabel?`<span class="badge ${parsed.priority===1?'badge-danger':parsed.priority===2?'badge-warn':'badge-muted'}">${parsed.priLabel}</span>`:""}${parsed.repeat?`<span class="badge badge-muted">Daily</span>`:""}`;
 }
 
 function renderStreakChip(){
@@ -811,6 +869,30 @@ function promptPopover(anchor, title, opts, onSave){
     input.addEventListener("keydown", e=>{ if(e.key==="Enter") submit(); });
     root.querySelector("#pmCancel").addEventListener("click", closePopover);
     root.querySelector("#pmSave").addEventListener("click", submit);
+  });
+}
+function openCategoryEditPopover(anchor, cat){
+  const body = `
+    <label class="field">Name<input class="input" id="ceName" value="${escapeHtml(cat.name)}"></label>
+    <label class="field">Colour<input type="color" class="color-input" id="ceColor" value="${cat.color}"></label>
+    <label class="field">Description <span style="font-weight:400;">(optional)</span>
+      <textarea class="input" id="ceDescription" rows="3" placeholder="Add a note...">${escapeHtml(cat.description||"")}</textarea>
+    </label>
+    <div class="modal-actions"><button class="btn" id="ceCancel">Cancel</button><button class="btn btn-primary" id="ceSave">Save</button></div>`;
+  openPopover(anchor, "Edit category", body, root=>{
+    const input = root.querySelector("#ceName");
+    input.focus(); input.select();
+    const submit = ()=>{
+      const name = input.value.trim();
+      if(!name){ toast("This can't be empty"); return; }
+      cat.name = name;
+      cat.color = root.querySelector("#ceColor").value;
+      cat.description = root.querySelector("#ceDescription").value.trim();
+      closePopover();
+      renderChecklist();
+    };
+    root.querySelector("#ceCancel").addEventListener("click", closePopover);
+    root.querySelector("#ceSave").addEventListener("click", submit);
   });
 }
 
@@ -1205,12 +1287,37 @@ function commitImport(mode){
 }
 
 /* ===================== active-days / streak ===================== */
+// Daily-repeat tasks track every completion date (so history/streak stays intact
+// across days), while ordinary tasks keep the simple done/completedAt pair.
+function taskDoneToday(t){
+  if(t.repeat==="daily") return (t.completedDates||[]).includes(todayISO());
+  return !!t.done;
+}
+function setTaskDoneToday(t, done){
+  if(t.repeat==="daily"){
+    t.completedDates = t.completedDates || [];
+    const idx = t.completedDates.indexOf(todayISO());
+    if(done && idx===-1) t.completedDates.push(todayISO());
+    else if(!done && idx!==-1) t.completedDates.splice(idx,1);
+  } else {
+    t.done = done;
+    t.completedAt = done ? todayISO() : null;
+  }
+}
+function taskCompletedOnDate(t, date){
+  if(t.repeat==="daily") return (t.completedDates||[]).includes(date);
+  return t.done && t.completedAt===date;
+}
 function getActiveDatesSet(){
   const set = new Set();
   state.sessions.forEach(s=> set.add(s.date));
+  const addTask = t=>{
+    if(t.repeat==="daily") (t.completedDates||[]).forEach(d=>set.add(d));
+    else if(t.done && t.completedAt) set.add(t.completedAt);
+  };
   state.tasks.forEach(cat=>{
-    cat.tasks.forEach(t=>{ if(t.done && t.completedAt) set.add(t.completedAt); });
-    cat.groups.forEach(g=> g.tasks.forEach(t=>{ if(t.done && t.completedAt) set.add(t.completedAt); }));
+    cat.tasks.forEach(addTask);
+    cat.groups.forEach(g=> g.tasks.forEach(addTask));
   });
   return set;
 }
@@ -1287,7 +1394,7 @@ function renderOverview(){
   document.getElementById("statPomosToday").textContent = state.sessions.filter(s=>s.date===todayISO()).length;
   renderHeroHeatmap();
   renderSubjectBalance();
-  const doneToday = allTasks().filter(t=>t.done && t.completedAt===todayISO()).length;
+  const doneToday = allTasks().filter(t=>taskCompletedOnDate(t, todayISO())).length;
   document.getElementById("statTasksToday").textContent = doneToday;
   renderStreakChip();
 
@@ -1314,7 +1421,7 @@ function renderOverview(){
   }
 
   // due soon (tasks due within 2 days, not done)
-  const due = allTasks().filter(t=> !t.done && t.due).map(t=>({...t, delta: daysBetween(todayISO(), t.due)}))
+  const due = allTasks().filter(t=> !taskDoneToday(t) && t.due).map(t=>({...t, delta: daysBetween(todayISO(), t.due)}))
     .filter(t=> t.delta<=2).sort((a,b)=>a.delta-b.delta).slice(0,6);
   const ovDue = document.getElementById("ovDue");
   ovDue.innerHTML = due.length? due.map(t=>{
@@ -1395,8 +1502,7 @@ function toggleTask(catId, groupId, taskId){
   const arr = groupId ? (cat.groups.find(g=>g.id===groupId)||{}).tasks : cat.tasks;
   if(!arr) return;
   const t = arr.find(x=>x.id===taskId); if(!t) return;
-  t.done = !t.done;
-  t.completedAt = t.done ? todayISO() : null;
+  setTaskDoneToday(t, !taskDoneToday(t));
   save();
   renderStreakChip();
 }
@@ -1773,7 +1879,7 @@ function renderChecklist(){
   const sidebar = document.getElementById("catSidebar");
   ensureActiveCat();
   const catListHtml = state.tasks.map(c=>{
-    const remaining = c.tasks.filter(t=>!t.done).length + c.groups.reduce((a,g)=>a+g.tasks.filter(t=>!t.done).length,0);
+    const remaining = c.tasks.filter(t=>!taskDoneToday(t)).length + c.groups.reduce((a,g)=>a+g.tasks.filter(t=>!taskDoneToday(t)).length,0);
     return `<div class="cat-item ${c.id===checklistState.activeCat && checklistState.filter==='all'?'active':''}" data-cat="${c.id}">
       <span class="dot" style="background:${c.color}"></span><span>${escapeHtml(c.name)}</span><span class="cat-count">${remaining}</span></div>`;
   }).join("");
@@ -1792,7 +1898,7 @@ function renderChecklist(){
   const cat = state.tasks.find(c=>c.id===checklistState.activeCat);
   if(!cat){ main.innerHTML = `<div class="empty">Select a category.</div>`; return; }
   const totalCount = cat.tasks.length + cat.groups.reduce((a,g)=>a+g.tasks.length,0);
-  const doneCount = cat.tasks.filter(t=>t.done).length + cat.groups.reduce((a,g)=>a+g.tasks.filter(t=>t.done).length,0);
+  const doneCount = cat.tasks.filter(t=>taskDoneToday(t)).length + cat.groups.reduce((a,g)=>a+g.tasks.filter(t=>taskDoneToday(t)).length,0);
   const pct = totalCount? Math.round(doneCount/totalCount*100):0;
 
   let html = `<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
@@ -1802,6 +1908,7 @@ function renderChecklist(){
         <button class="iconbtn" data-del-cat="${cat.id}">${icon('<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>')}</button>
       </div>
     </div>
+    ${cat.description?`<div style="font-size:12.5px; color:var(--text-dim); margin-bottom:10px; white-space:pre-wrap;">${escapeHtml(cat.description)}</div>`:""}
     <div class="progress-track"><div class="progress-fill" style="width:${pct}%; background:${cat.color};"></div></div>
     <hr class="sep">`;
 
@@ -1819,9 +1926,7 @@ function renderChecklist(){
   wireTaskEvents(main);
 
   main.querySelector(`[data-rename-cat]`).addEventListener("click", (e)=>{
-    promptPopover(e.currentTarget, "Rename category", {label:"Name", value:cat.name, color:cat.color}, (name,color)=>{
-      cat.name = name; cat.color = color; save(); renderChecklist();
-    });
+    openCategoryEditPopover(e.currentTarget, cat);
   });
   main.querySelector(`[data-del-cat]`).addEventListener("click", ()=>{
     if(confirm(`Delete category "${cat.name}" and all its tasks?`)){
@@ -1843,11 +1948,14 @@ function renderTaskList(tasks, catId, groupId){
   if(!tasks.length) return `<div class="empty" style="padding:8px 2px;">No tasks</div>`;
   const priColors = {0:"transparent",1:"#dc2626",2:"#d97706",3:"#3b82f6"};
   return tasks.map(t=>{
-    const overdue = t.due && !t.done && t.due<todayISO();
+    const done = taskDoneToday(t);
+    const overdue = t.due && !done && t.due<todayISO();
     return `<div class="task-row">
-      <div class="task-check ${t.done?'done':''}" data-toggle="${catId}:${groupId||''}:${t.id}">${t.done?icon('<path d="M20 6L9 17l-5-5"/>',11):''}</div>
+      <div class="task-check ${done?'done':''}" data-toggle="${catId}:${groupId||''}:${t.id}">${done?icon('<path d="M20 6L9 17l-5-5"/>',11):''}</div>
       ${t.priority?`<span class="pri-dot" style="background:${priColors[t.priority]}"></span>`:''}
-      <span class="task-title ${t.done?'done':''}" data-edit-task="${catId}:${groupId||''}:${t.id}">${escapeHtml(t.title)}</span>
+      <span class="task-title ${done?'done':''}" data-edit-task="${catId}:${groupId||''}:${t.id}">${escapeHtml(t.title)}</span>
+      ${t.repeat==="daily"?`<span class="iconbtn" style="cursor:default; color:var(--text-faint);" title="Repeats daily">${icon('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',13)}</span>`:''}
+      ${t.description?`<span class="iconbtn" style="cursor:default; color:var(--text-faint);" title="${escapeHtml(t.description)}">${icon('<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',13)}</span>`:''}
       ${t.due?`<span class="task-due" style="background:${overdue?'var(--danger-soft)':'var(--surface-2)'}; color:${overdue?'var(--danger)':'var(--text-dim)'}">${t.due}</span>`:''}
       <button class="iconbtn" data-del-task="${catId}:${groupId||''}:${t.id}">${icon('<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',13)}</button>
     </div>`;
@@ -1882,7 +1990,7 @@ function wireTaskEvents(root){
       if(e.key==="Enter" && e.target.value.trim()){
         const parsed = parseQuickAdd(e.target.value.trim());
         const arr = findTaskArr(el.dataset.newTaskCat, el.dataset.newTaskGroup||null);
-        arr.push({id:uid(), title:parsed.title || e.target.value.trim(), done:false, due:parsed.due, priority:parsed.priority, completedAt:null});
+        arr.push({id:uid(), title:parsed.title || e.target.value.trim(), done:false, due:parsed.due, priority:parsed.priority, completedAt:null, repeat:parsed.repeat||null, completedDates:[], description:""});
         e.target.value=""; save(); renderChecklist(); renderOverview();
       }
     });
@@ -1899,6 +2007,10 @@ function openTaskEditModal(catId, groupId, taskId, anchor){
         <div class="input" id="tfPriority"></div>
       </label>
     </div>
+    <label class="field"><label class="radio-field" style="margin-bottom:0;"><input type="checkbox" id="tfRepeat" ${t.repeat==="daily"?"checked":""}> Repeats daily</label></label>
+    <label class="field">Description <span style="font-weight:400;">(optional)</span>
+      <textarea class="input" id="tfDescription" rows="3" placeholder="Add a note...">${escapeHtml(t.description||"")}</textarea>
+    </label>
     <div class="modal-actions"><button class="btn" id="tfCancel">Cancel</button><button class="btn btn-primary" id="tfSave">Save</button></div>`;
   openPopover(anchor, "Edit task", body, root=>{
     initSelect(root.querySelector("#tfPriority"), [
@@ -1909,12 +2021,15 @@ function openTaskEditModal(catId, groupId, taskId, anchor){
       t.title = root.querySelector("#tfTitle").value.trim() || t.title;
       t.due = root.querySelector("#tfDue").value || null;
       t.priority = Number(root.querySelector("#tfPriority").value);
+      t.repeat = root.querySelector("#tfRepeat").checked ? "daily" : null;
+      if(t.repeat==="daily" && !t.completedDates) t.completedDates = [];
+      t.description = root.querySelector("#tfDescription").value.trim();
       save(); closePopover(); renderChecklist(); renderOverview();
     });
   });
 }
 function renderFilteredView(main){
-  const list = allTasks().filter(t=>!t.done).filter(t=>{
+  const list = allTasks().filter(t=>!taskDoneToday(t)).filter(t=>{
     if(!t.due) return false;
     if(checklistState.filter==="today") return t.due<=todayISO();
     if(checklistState.filter==="upcoming") return t.due>todayISO() && daysBetween(todayISO(),t.due)<=7;
@@ -2255,7 +2370,7 @@ function renderTrendChart(){
 }
 function renderTaskDonut(){
   const all = allTasks();
-  const done = all.filter(t=>t.done).length, total = all.length;
+  const done = all.filter(t=>taskDoneToday(t)).length, total = all.length;
   const pct = total? Math.round(done/total*100):0;
   const r=42, c=2*Math.PI*r;
   const svg = `<svg width="100" height="100" viewBox="0 0 100 100">
