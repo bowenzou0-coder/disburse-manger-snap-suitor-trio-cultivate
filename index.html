@@ -236,6 +236,7 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
 .hero-heat-streak span{font-size:26px;}
 .hero-heat-card .heat-grid{grid-template-rows:repeat(7,9px); gap:2px; margin:auto 0; min-width:0; overflow-x:auto;}
 .hero-heat-card .heat-cell{width:9px; height:9px; border-radius:2px;}
+.heat-cell.heat-today{box-shadow:0 0 0 1.5px var(--accent);}
 @media (max-width:900px){
   .overview-hero-row{grid-template-columns:minmax(0,1fr);}
   .hero-heat-head{flex-direction:column; align-items:flex-start; gap:4px;}
@@ -304,6 +305,9 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
 .dur-row input{width:52px; text-align:center; padding:5px;}
 .session-item{display:flex; align-items:center; gap:9px; padding:7px 2px; font-size:12.5px; border-bottom:1px solid var(--border);}
 .session-item:last-child{border-bottom:none;}
+.session-item.live .dot{animation:pomoPulse 1.6s ease-in-out infinite;}
+@keyframes pomoPulse{0%,100%{opacity:1;} 50%{opacity:.35;}}
+@media (prefers-reduced-motion: reduce){ .session-item.live .dot{animation:none;} }
 .sw-hint{font-size:12px; color:var(--text-faint); text-align:center;}
 
 /* ---------- Checklist ---------- */
@@ -487,6 +491,7 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
             <div class="pomo-ring-label"><div class="pomo-time" id="pomoTime">25:00</div><div class="pomo-mode" id="pomoMode">Focus</div></div>
           </div>
           <div class="pomo-controls" id="pomoControls"></div>
+          <button class="btn btn-sm" id="pomoLogNow" style="display:none;">Log progress so far</button>
           <div class="row" id="durRow" style="gap:14px;">
             <div class="dur-row">Focus <input class="input" type="number" min="1" max="120" id="durWork"></div>
             <div class="dur-row">Short <input class="input" type="number" min="1" max="60" id="durShort"></div>
@@ -1341,14 +1346,24 @@ document.getElementById("ovNotes").addEventListener("input", e=>{ state.notes = 
 
 function renderHeroHeatmap(){
   document.getElementById("heroStreakNum").textContent = computeStreak();
-  const days = [];
-  for(let i=364;i>=0;i--) days.push(addDays(todayISO(), -i));
-  const maxMin = Math.max(1, ...days.map(minutesOnDate));
-  document.getElementById("heroHeatGrid").innerHTML = days.map(d=>{
+  // Calendar-aligned like GitHub's contribution graph: Jan 1 - Dec 31 of the current
+  // year, left-padded so each date lands in its real weekday row / week column —
+  // not a rolling "365 days ago" window, which read as arbitrary and unintuitive.
+  const year = new Date().getFullYear();
+  const jan1 = new Date(year, 0, 1);
+  const dec31 = new Date(year, 11, 31);
+  const cells = [];
+  for(let i=0, pad=mondayIndex(jan1); i<pad; i++) cells.push(null);
+  for(let d=new Date(jan1); d<=dec31; d.setDate(d.getDate()+1)) cells.push(isoDate(d));
+  const today = todayISO();
+  const maxMin = Math.max(1, ...cells.filter(Boolean).map(minutesOnDate));
+  document.getElementById("heroHeatGrid").innerHTML = cells.map(d=>{
+    if(!d) return `<div class="heat-cell" style="visibility:hidden;"></div>`;
     const min = minutesOnDate(d);
     const alpha = min===0? 0 : 0.25 + 0.75*Math.min(1,min/maxMin);
     const bg = min===0 ? "var(--surface)" : `color-mix(in srgb, var(--accent) ${Math.round(alpha*100)}%, var(--surface))`;
-    return `<div class="heat-cell" title="${d}: ${min}m" style="background:${bg}"></div>`;
+    const isToday = d===today;
+    return `<div class="heat-cell${isToday?' heat-today':''}" title="${d}: ${min}m${isToday?' · today':''}" style="background:${bg}"></div>`;
   }).join("");
 }
 function renderSubjectBalance(){
@@ -1543,7 +1558,8 @@ function openPeriodModal(periodId, prefillDay, anchor){
 }
 
 /* ===================== POMODORO / STOPWATCH ===================== */
-let timer = { timerType:"pomodoro", mode:"work", running:false, intervalId:null, cycles:0, segStart:null, accumSec:0 };
+let timer = { timerType:"pomodoro", mode:"work", running:false, intervalId:null, cycles:0, segStart:null, accumSec:0, loggedSec:0 };
+let pomoSubjectId = "";
 function phaseSeconds(mode){
   if(mode==="work") return state.settings.pomodoroWork*60;
   if(mode==="short") return state.settings.pomodoroShort*60;
@@ -1559,7 +1575,15 @@ function renderPomodoro(){
     b.addEventListener("click", ()=> switchTimerType(b.dataset.timerMode)));
 
   const sel = document.getElementById("pomoSubject");
-  initSelect(sel, [{value:"",label:"General / no subject"}].concat(state.subjects.map(s=>({value:s.id,label:s.name}))), "");
+  const subjOpts = [{value:"",label:"General / no subject"}].concat(state.subjects.map(s=>({value:s.id,label:s.name})));
+  if(pomoSubjectId && !state.subjects.find(s=>s.id===pomoSubjectId)) pomoSubjectId = "";
+  if(!sel.dataset.wired){
+    initSelect(sel, subjOpts, pomoSubjectId, v=>{ pomoSubjectId = v; });
+    sel.dataset.wired = "1";
+  } else {
+    sel.cselOptions = subjOpts;
+    sel.value = pomoSubjectId;
+  }
   const isPomo = timer.timerType==="pomodoro";
   document.getElementById("durRow").style.display = isPomo ? "flex" : "none";
   document.getElementById("swHint").style.display = isPomo ? "none" : "block";
@@ -1573,21 +1597,25 @@ function renderPomodoro(){
 function switchTimerType(type){
   if(type===timer.timerType) return;
   clearInterval(timer.intervalId); timer.intervalId=null;
-  timer.timerType = type; timer.mode = "work"; timer.running = false; timer.accumSec = 0; timer.segStart = null;
+  timer.timerType = type; timer.mode = "work"; timer.running = false; timer.accumSec = 0; timer.segStart = null; timer.loggedSec = 0;
   renderPomodoro();
 }
 function renderTimerControls(){
   const wrap = document.getElementById("pomoControls");
+  const logBtn = document.getElementById("pomoLogNow");
   if(timer.timerType==="stopwatch"){
     wrap.innerHTML = `<button class="btn btn-primary" id="pomoStart">${timer.running?"Pause":"Start"}</button>
       <button class="btn" id="pomoStopLog">Stop &amp; log</button>`;
     wrap.querySelector("#pomoStopLog").addEventListener("click", onStopLog);
+    logBtn.style.display = "none";
   } else {
     wrap.innerHTML = `<button class="btn btn-primary" id="pomoStart">${timer.running?"Pause":"Start"}</button>
       <button class="btn" id="pomoReset">Reset</button>
       <button class="btn" id="pomoSkip">Skip</button>`;
     wrap.querySelector("#pomoReset").addEventListener("click", onReset);
     wrap.querySelector("#pomoSkip").addEventListener("click", onSkip);
+    logBtn.style.display = (timer.mode==="work" && elapsedSec()-timer.loggedSec>=30) ? "inline-flex" : "none";
+    logBtn.onclick = onLogNow;
   }
   wrap.querySelector("#pomoStart").addEventListener("click", onStartPause);
 }
@@ -1627,27 +1655,42 @@ function tick(){
   if(timer.timerType==="pomodoro"){
     const secondsLeft = phaseSeconds(timer.mode) - elapsedSec();
     if(secondsLeft<=0){
+      timer.accumSec = elapsedSec();
       clearInterval(timer.intervalId); timer.running=false; timer.intervalId=null;
       completePhase();
       return;
     }
   }
   updateTimerDisplay();
+  renderPomoSessions();
+  const logBtn = document.getElementById("pomoLogNow");
+  if(logBtn) logBtn.style.display = (timer.timerType==="pomodoro" && timer.mode==="work" && elapsedSec()-timer.loggedSec>=30) ? "inline-flex" : "none";
+}
+// Banks whatever's newly elapsed since the last log point as a session, without
+// touching segStart/accumSec — so the countdown display keeps running smoothly
+// through a mid-session "Log now" instead of jumping or resetting.
+function bankElapsed(kind, allowSmall){
+  const total = elapsedSec();
+  const newSec = total - timer.loggedSec;
+  if(newSec < (allowSmall ? 1 : 30)) return 0;
+  const minutes = Math.max(1, Math.round(newSec/60));
+  state.sessions.push({ id:uid(), subjectId: pomoSubjectId||null, date:todayISO(), minutes, at: Date.now(), kind });
+  timer.loggedSec = total;
+  save();
+  return minutes;
 }
 function completePhase(){
   beep();
   if(timer.mode==="work"){
-    const subjectId = document.getElementById("pomoSubject").value || null;
-    state.sessions.push({ id:uid(), subjectId, date:todayISO(), minutes: state.settings.pomodoroWork, at: Date.now(), kind:"pomodoro" });
+    const minutes = bankElapsed("pomodoro", true);
     timer.cycles++;
-    save();
-    toast("Focus session complete — nice work!");
+    toast(minutes>0 ? "Focus session complete — nice work!" : "Focus session complete!");
     timer.mode = (timer.cycles % state.settings.longBreakInterval === 0) ? "long" : "short";
   } else {
     toast("Break's over — ready to focus?");
     timer.mode = "work";
   }
-  timer.accumSec = 0; timer.segStart = null;
+  timer.accumSec = 0; timer.segStart = null; timer.loggedSec = 0;
   renderPomoSessions(); renderOverview(); renderTimerControls();
   updateTimerDisplay();
 }
@@ -1659,30 +1702,30 @@ function onStartPause(){
     timer.segStart = Date.now(); timer.running = true;
     timer.intervalId = setInterval(tick, 1000);
   }
-  renderTimerControls(); updateTimerDisplay();
+  renderTimerControls(); updateTimerDisplay(); renderPomoSessions();
 }
 function onReset(){
   clearInterval(timer.intervalId); timer.intervalId=null; timer.running=false;
-  timer.accumSec = 0; timer.segStart = null;
-  renderTimerControls(); updateTimerDisplay();
+  timer.accumSec = 0; timer.segStart = null; timer.loggedSec = 0;
+  renderTimerControls(); updateTimerDisplay(); renderPomoSessions();
 }
 function onSkip(){
+  if(timer.running) timer.accumSec = elapsedSec();
   clearInterval(timer.intervalId); timer.intervalId=null; timer.running=false;
-  timer.accumSec = phaseSeconds(timer.mode);
   completePhase();
 }
+function onLogNow(){
+  const minutes = bankElapsed("pomodoro", true);
+  if(minutes>0) toast(`Logged ${minutes} min so far — keep going!`);
+  renderPomoSessions(); renderOverview(); renderTimerControls();
+}
 function onStopLog(){
-  const secs = elapsedSec();
+  if(timer.running) timer.accumSec = elapsedSec();
   clearInterval(timer.intervalId); timer.intervalId=null; timer.running=false;
-  if(secs>=30){
-    const subjectId = document.getElementById("pomoSubject").value || null;
-    const minutes = Math.max(1, Math.round(secs/60));
-    state.sessions.push({ id:uid(), subjectId, date:todayISO(), minutes, at: Date.now(), kind:"stopwatch" });
-    save();
-    toast(`Logged ${minutes} min — nice work!`);
-    renderPomoSessions(); renderOverview();
-  }
-  timer.accumSec = 0; timer.segStart = null;
+  const minutes = bankElapsed("stopwatch", false);
+  if(minutes>0) toast(`Logged ${minutes} min — nice work!`);
+  timer.accumSec = 0; timer.segStart = null; timer.loggedSec = 0;
+  renderPomoSessions(); renderOverview();
   renderTimerControls(); updateTimerDisplay();
 }
 ["durWork","durShort","durLong"].forEach(id=>{
@@ -1692,19 +1735,26 @@ function onStopLog(){
     if(id==="durShort") state.settings.pomodoroShort=v;
     if(id==="durLong") state.settings.pomodoroLong=v;
     save();
-    if(!timer.running){ timer.accumSec = 0; updateTimerDisplay(); }
+    if(!timer.running){ timer.accumSec = 0; timer.loggedSec = 0; updateTimerDisplay(); }
   });
 });
 function renderPomoSessions(){
   const todays = state.sessions.filter(s=>s.date===todayISO()).sort((a,b)=>b.at-a.at);
-  document.getElementById("pomoTodayTotal").textContent = fmtHM(todays.reduce((a,s)=>a+s.minutes,0));
+  const loggedTotal = todays.reduce((a,s)=>a+s.minutes,0);
+  const liveSec = timer.running ? Math.max(0, elapsedSec()-timer.loggedSec) : 0;
+  const liveMin = Math.floor(liveSec/60);
+  document.getElementById("pomoTodayTotal").textContent = fmtHM(loggedTotal + liveMin);
   const list = document.getElementById("pomoSessions");
-  list.innerHTML = todays.length ? todays.map(s=>{
+  const liveSubj = subjectById(pomoSubjectId);
+  const liveRow = (timer.running && liveSec>=60) ? `<div class="session-item live"><span class="dot" style="background:${liveSubj?liveSubj.color:'var(--accent)'}"></span>
+      <span style="flex:1; font-style:italic; color:var(--text-dim);">${liveSubj?escapeHtml(liveSubj.name):"General"} · in progress</span>
+      <span style="color:var(--accent); font-family:var(--mono); font-weight:600;">${liveMin}m</span></div>` : "";
+  list.innerHTML = liveRow + (todays.length ? todays.map(s=>{
     const subj = subjectById(s.subjectId);
     return `<div class="session-item"><span class="dot" style="background:${subj?subj.color:'#94a3b8'}"></span>
       <span style="flex:1;">${subj?escapeHtml(subj.name):"General"}</span>
       <span style="color:var(--text-dim);">${s.minutes}m</span></div>`;
-  }).join("") : `<div class="empty">No sessions logged yet today.</div>`;
+  }).join("") : (liveRow ? "" : `<div class="empty">No sessions logged yet today.</div>`));
 }
 
 /* ===================== CHECKLIST ===================== */
@@ -2058,12 +2108,12 @@ function renderMarkLineChart(el, entries, bench, color){
   const benchY = bench!=null ? h-24-(bench/100)*(h-56) : null;
   el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto;">
     <line x1="${pad}" y1="${h-24}" x2="${w-pad}" y2="${h-24}" stroke="var(--border)"/>
-    ${benchY!=null?`<line x1="${pad}" y1="${benchY.toFixed(1)}" x2="${w-pad}" y2="${benchY.toFixed(1)}" stroke="var(--text-faint)" stroke-dasharray="4 4"/>`:''}
-    <path d="${avgPath}" fill="none" stroke="var(--text-faint)" stroke-width="1.5" stroke-dasharray="2 3"/>
+    ${benchY!=null?`<line x1="${pad}" y1="${benchY.toFixed(1)}" x2="${w-pad}" y2="${benchY.toFixed(1)}" stroke="color-mix(in srgb, ${color} 55%, var(--text))"/>`:''}
+    <path d="${avgPath}" fill="none" stroke="color-mix(in srgb, ${color} 55%, var(--surface))" stroke-width="1.75"/>
     <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5"/>
     ${pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" fill="${color}"/>`).join("")}
   </svg>
-  <div class="chart-legend"><span><span class="dot" style="background:${color}"></span>Score</span><span><span class="dot" style="background:var(--text-faint)"></span>Running average</span>${bench!=null?`<span><span class="dot" style="background:var(--text-faint); opacity:.5;"></span>Benchmark</span>`:''}</div>`;
+  <div class="chart-legend"><span><span class="dot" style="background:${color}"></span>Score</span><span><span class="dot" style="background:color-mix(in srgb, ${color} 55%, var(--surface))"></span>Running average</span>${bench!=null?`<span><span class="dot" style="background:color-mix(in srgb, ${color} 55%, var(--text));"></span>Benchmark</span>`:''}</div>`;
 }
 function renderNextAssessCard(){
   const upcoming = state.marks.filter(m=>m.score==null && m.date>=todayISO()).sort((a,b)=>a.date.localeCompare(b.date));
