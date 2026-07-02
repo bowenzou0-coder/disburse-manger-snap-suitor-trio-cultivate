@@ -922,10 +922,26 @@ function openImportModal(){
     root.querySelector("#impCancel").addEventListener("click", closeModal);
   });
 }
+function dedupeImportRows(rows){
+  // School calendar exports list every individual week's occurrence of a class across
+  // a whole term, not one weekly template — without this, "Chemistry every Tuesday for
+  // 15 weeks" becomes 15 near-identical overlapping periods instead of one weekly slot.
+  const seen = new Set();
+  return rows.filter(r=>{
+    if(r.error) return true;
+    const key = `${r.day}|${r.subject.trim().toLowerCase()}|${r.start}|${r.end}`;
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 function runImportParse(text, filename, root){
   const isICS = /^BEGIN:VCALENDAR/im.test(text) || /\.ics$/i.test(filename);
   const result = isICS ? parseICS(text) : parseCSV(text);
-  importState.rows = result.rows.map(r=> ({...r, include: !r.error}));
+  const deduped = dedupeImportRows(result.rows);
+  const dupCount = result.rows.length - deduped.length;
+  importState.rows = deduped.map(r=> ({...r, include: !r.error}));
+  importState.dupCount = dupCount;
   importState.subjectMap = {};
   [...new Set(importState.rows.filter(r=>!r.error && !findSubjectByName(r.subject)).map(r=>r.subject.trim()))].forEach(name=>{
     const suggestion = suggestSubjectMatch(name);
@@ -946,7 +962,8 @@ function renderImportPreview(root, topError){
   wrap.innerHTML = `
     <hr class="sep">
     <div style="font-size:12.5px; color:var(--text-dim); margin-bottom:8px;">
-      Found ${rows.length} row${rows.length===1?"":"s"} — ${validCount} usable${rows.length-validCount>0?`, ${rows.length-validCount} skipped`:""}.
+      Found ${rows.length} weekly period${rows.length===1?"":"s"} — ${validCount} usable${rows.length-validCount>0?`, ${rows.length-validCount} skipped`:""}.
+      ${importState.dupCount>0?` Collapsed ${importState.dupCount} repeated week-to-week occurrence${importState.dupCount===1?"":"s"} of the same class into one weekly slot.`:""}
     </div>
     ${unmatchedNames.length ? `
     <div style="font-size:12.5px; font-weight:600; color:var(--text); margin-bottom:6px;">Map imported subjects</div>
