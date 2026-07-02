@@ -179,6 +179,27 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
 .import-table tr.row-error td{color:var(--danger); opacity:.8; font-size:12px;}
 .radio-field{display:flex; align-items:center; gap:7px; font-size:13px; font-weight:500; color:var(--text-dim); cursor:pointer;}
 
+/* ---------- Custom select (native <select> dropdown lists ignore page fonts/CSS —
+   this is a drop-in replacement that keeps a .value/change-event API but renders
+   its own list, so text stays in Public Sans everywhere, on every platform) ---------- */
+.csel{display:flex; align-items:center; justify-content:space-between; gap:6px; cursor:pointer; user-select:none;}
+.csel:focus-visible{outline:2px solid var(--accent); outline-offset:1px;}
+.csel-label{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left;}
+.csel-chevron{flex-shrink:0; color:var(--text-faint);}
+.csel-dropdown{position:fixed; z-index:250; background:var(--surface); border-radius:var(--radius-sm); box-shadow:0 8px 24px rgba(43,38,32,.16), inset 0 0 0 1px var(--border); padding:4px; max-height:280px; overflow:auto;}
+.csel-option{display:block; width:100%; text-align:left; padding:8px 10px; border:none; background:transparent; border-radius:6px; font-size:13.5px; font-family:var(--font); color:var(--text); cursor:pointer;}
+.csel-option:hover{background:var(--surface-2);}
+.csel-option.active{background:var(--accent-soft); color:var(--accent); font-weight:600;}
+
+.sheet-overlay{position:fixed; inset:0; background:rgba(43,38,32,0); z-index:300; display:flex; align-items:flex-end; justify-content:center; transition:background .2s ease; pointer-events:none;}
+.sheet-overlay.open{background:rgba(43,38,32,.35); pointer-events:auto;}
+.sheet{background:var(--surface); width:100%; max-width:520px; border-radius:16px 16px 0 0; padding:8px 8px calc(18px + env(safe-area-inset-bottom)); max-height:72vh; overflow:auto; transform:translateY(100%); transition:transform .22s cubic-bezier(0.32,0.72,0,1); box-shadow:0 -8px 24px rgba(43,38,32,.12);}
+.sheet-overlay.open .sheet{transform:translateY(0);}
+.sheet-handle{width:36px; height:4px; background:var(--border); border-radius:99px; margin:6px auto 10px;}
+.sheet-title{font-size:13px; font-weight:700; color:var(--text-dim); padding:4px 10px 10px;}
+.sheet-option{display:block; width:100%; text-align:left; padding:13px 14px; border:none; background:transparent; border-radius:10px; font-size:15px; font-family:var(--font); color:var(--text); cursor:pointer;}
+.sheet-option.active{background:var(--accent-soft); color:var(--accent); font-weight:600;}
+
 /* ---------- Inline add row (quick-add with no overlay at all) ---------- */
 .inline-add-row{display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:var(--radius-sm); background:var(--surface); box-shadow:inset 0 0 0 1.5px var(--accent);}
 .inline-add-row input{border:none; background:transparent; padding:0; box-shadow:none; flex:1; font-size:13.5px; outline:none; color:var(--text); font-family:var(--font);}
@@ -414,7 +435,7 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
       <div class="pomo-wrap">
         <div class="card pomo-timer">
           <div class="filter-tabs" id="timerModeTabs" style="margin-bottom:0;"></div>
-          <select class="input" id="pomoSubject" style="max-width:220px;"></select>
+          <div class="input" id="pomoSubject" style="max-width:220px;"></div>
           <div class="pomo-ring">
             <svg width="220" height="220" viewBox="0 0 220 220">
               <circle cx="110" cy="110" r="100" fill="none" stroke="var(--border)" stroke-width="10"/>
@@ -474,7 +495,7 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
         </div>
         <div class="card">
           <div class="section-title">Mark trend
-            <select class="input" id="trendSubject" style="width:auto; padding:4px 8px; font-size:12px;"></select>
+            <div class="input" id="trendSubject" style="width:auto; min-width:140px; padding:4px 8px; font-size:12px;"></div>
           </div>
           <div id="chartTrend"></div>
         </div>
@@ -720,6 +741,84 @@ function promptPopover(anchor, title, opts, onSave){
     root.querySelector("#pmCancel").addEventListener("click", closePopover);
     root.querySelector("#pmSave").addEventListener("click", submit);
   });
+}
+
+/* ===================== custom select (replaces native <select>) ===================== */
+function isMobileViewport(){ return window.innerWidth < 640; }
+let activeCselDropdown = null;
+function closeCselDropdown(){
+  if(!activeCselDropdown) return;
+  activeCselDropdown.el.remove();
+  document.removeEventListener("mousedown", activeCselDropdown.outside, true);
+  activeCselDropdown = null;
+}
+function openSelectPicker(anchor, options, currentValue, onPick){
+  if(isMobileViewport()){
+    const overlay = document.createElement("div");
+    overlay.className = "sheet-overlay";
+    overlay.innerHTML = `<div class="sheet"><div class="sheet-handle"></div><div class="sheet-list">${
+      options.map(o=>`<button class="sheet-option ${String(o.value)===String(currentValue)?"active":""}" data-v="${escapeHtml(String(o.value))}">${escapeHtml(o.label)}</button>`).join("")
+    }</div></div>`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(()=> overlay.classList.add("open"));
+    function close(){ overlay.classList.remove("open"); setTimeout(()=>overlay.remove(), 220); }
+    overlay.addEventListener("mousedown", e=>{ if(e.target===overlay) close(); });
+    overlay.querySelectorAll(".sheet-option").forEach(b=> b.addEventListener("click", ()=>{ onPick(b.dataset.v); close(); }));
+  } else {
+    closeCselDropdown();
+    const r = anchor.getBoundingClientRect();
+    const dd = document.createElement("div");
+    dd.className = "csel-dropdown";
+    dd.style.visibility = "hidden";
+    dd.innerHTML = options.map(o=>`<button class="csel-option ${String(o.value)===String(currentValue)?"active":""}" data-v="${escapeHtml(String(o.value))}">${escapeHtml(o.label)}</button>`).join("");
+    document.body.appendChild(dd);
+    const ddw = Math.max(r.width, 170);
+    dd.style.width = ddw + "px";
+    let left = Math.max(8, Math.min(r.left, window.innerWidth - ddw - 8));
+    let top = r.bottom + 4;
+    if(top + dd.offsetHeight > window.innerHeight - 8) top = Math.max(8, r.top - dd.offsetHeight - 4);
+    dd.style.left = left + "px"; dd.style.top = top + "px"; dd.style.visibility = "visible";
+    const outside = e=>{ if(!dd.contains(e.target) && e.target!==anchor && !anchor.contains(e.target)) closeCselDropdown(); };
+    setTimeout(()=> document.addEventListener("mousedown", outside, true), 0);
+    activeCselDropdown = { el: dd, outside };
+    dd.querySelectorAll(".csel-option").forEach(b=> b.addEventListener("click", ()=>{ onPick(b.dataset.v); closeCselDropdown(); }));
+  }
+}
+// Turns a plain placeholder element into a fully custom-styled dropdown that keeps
+// the same .value / change-event surface as a native <select>, so existing code
+// (el.value, el.addEventListener("change", ...)) keeps working unmodified.
+function initSelect(el, options, value, onChange){
+  if(!el) return;
+  el.classList.add("csel");
+  el.setAttribute("tabindex", "0");
+  el.setAttribute("role", "button");
+  let current = value!=null ? String(value) : (options[0] ? String(options[0].value) : "");
+  let opts = options;
+  function labelFor(v){ const o = opts.find(o=>String(o.value)===String(v)); return o ? o.label : ""; }
+  function paint(){
+    el.innerHTML = `<span class="csel-label">${escapeHtml(labelFor(current))}</span>${icon('<path d="M6 9l6 6 6-6"/>',14)}`;
+    el.querySelector(".csel-chevron");
+    el.lastElementChild && el.lastElementChild.classList.add("csel-chevron");
+  }
+  Object.defineProperty(el, "value", {
+    get(){ return current; },
+    set(v){ current = v!=null ? String(v) : ""; paint(); },
+    configurable: true
+  });
+  Object.defineProperty(el, "cselOptions", {
+    get(){ return opts; },
+    set(v){ opts = v; paint(); },
+    configurable: true
+  });
+  paint();
+  el.addEventListener("click", ()=>{
+    openSelectPicker(el, opts, current, v=>{
+      current = v; paint();
+      el.dispatchEvent(new Event("change", {bubbles:true}));
+      if(onChange) onChange(v);
+    });
+  });
+  el.addEventListener("keydown", e=>{ if(e.key==="Enter" || e.key===" "){ e.preventDefault(); el.click(); } });
 }
 
 /* ===================== modal (for surfaces too big for a popover) ===================== */
@@ -971,11 +1070,7 @@ function renderImportPreview(root, topError){
       ${unmatchedNames.map(name=> `
         <div style="display:flex; align-items:center; gap:8px;">
           <div style="flex:1; font-size:12.5px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(name)}</div>
-          <select class="input" style="flex:1;" data-subj-map="${escapeHtml(name)}">
-            <option value="new" ${importState.subjectMap[name]==="new"?"selected":""}>Create new subject</option>
-            ${state.subjects.map(s=> `<option value="${s.id}" ${importState.subjectMap[name]===s.id?"selected":""}>Map to ${escapeHtml(s.name)}</option>`).join("")}
-            <option value="skip" ${importState.subjectMap[name]==="skip"?"selected":""}>Don't import these rows</option>
-          </select>
+          <div class="input" style="flex:1;" data-subj-map="${escapeHtml(name)}"></div>
         </div>
       `).join("")}
     </div>` : ""}
@@ -1003,10 +1098,16 @@ function renderImportPreview(root, topError){
     importState.rows[Number(e.target.dataset.impRow)].include = e.target.checked;
     wrap.querySelector("#impCommit").textContent = `Import ${importResolvedCount()} period${importResolvedCount()===1?"":"s"}`;
   }));
-  wrap.querySelectorAll("[data-subj-map]").forEach(sel=> sel.addEventListener("change", e=>{
-    importState.subjectMap[e.target.dataset.subjMap] = e.target.value;
-    wrap.querySelector("#impCommit").textContent = `Import ${importResolvedCount()} period${importResolvedCount()===1?"":"s"}`;
-  }));
+  wrap.querySelectorAll("[data-subj-map]").forEach(sel=>{
+    const name = sel.dataset.subjMap;
+    const opts = [{value:"new",label:"Create new subject"}]
+      .concat(state.subjects.map(s=>({value:s.id, label:"Map to "+s.name})))
+      .concat([{value:"skip",label:"Don't import these rows"}]);
+    initSelect(sel, opts, importState.subjectMap[name], v=>{
+      importState.subjectMap[name] = v;
+      wrap.querySelector("#impCommit").textContent = `Import ${importResolvedCount()} period${importResolvedCount()===1?"":"s"}`;
+    });
+  });
   wrap.querySelector("#impCancel2").addEventListener("click", closeModal);
   wrap.querySelector("#impCommit").addEventListener("click", ()=>{
     const mode = wrap.querySelector('input[name="impMode"]:checked').value;
@@ -1265,13 +1366,12 @@ document.getElementById("ttAddBtn").addEventListener("click", (e)=> openPeriodMo
 
 function openPeriodModal(periodId, prefillDay, anchor){
   const editing = periodId ? state.timetable.find(p=>p.id===periodId) : null;
-  const subjOptions = state.subjects.map(s=>`<option value="${s.id}" ${editing&&editing.subjectId===s.id?"selected":""}>${escapeHtml(s.name)}</option>`).join("");
   const body = `
     <label class="field">Day
-      <select class="input" id="pfDay">${DAYS.map((d,i)=>`<option value="${i}" ${((editing?editing.day:prefillDay)===i)?"selected":""}>${d}</option>`).join("")}</select>
+      <div class="input" id="pfDay"></div>
     </label>
     <label class="field">Subject
-      <select class="input" id="pfSubject"><option value="">— custom label —</option>${subjOptions}</select>
+      <div class="input" id="pfSubject"></div>
     </label>
     <label class="field" id="pfLabelWrap" style="display:${editing&&!editing.subjectId?'flex':'none'}">Custom label
       <input class="input" id="pfLabel" value="${editing&&editing.label?escapeHtml(editing.label):''}" placeholder="e.g. Assembly">
@@ -1290,8 +1390,10 @@ function openPeriodModal(periodId, prefillDay, anchor){
       <button class="btn btn-primary" id="pfSave">Save</button>
     </div>`;
   openPopover(anchor, editing?"Edit period":"Add period", body, (root)=>{
-    root.querySelector("#pfSubject").addEventListener("change", e=>{
-      root.querySelector("#pfLabelWrap").style.display = e.target.value ? "none" : "flex";
+    initSelect(root.querySelector("#pfDay"), DAYS.map((d,i)=>({value:i,label:d})), editing?editing.day:prefillDay);
+    const subjOpts = [{value:"",label:"— custom label —"}].concat(state.subjects.map(s=>({value:s.id,label:s.name})));
+    initSelect(root.querySelector("#pfSubject"), subjOpts, editing&&editing.subjectId?editing.subjectId:"", v=>{
+      root.querySelector("#pfLabelWrap").style.display = v ? "none" : "flex";
     });
     root.querySelector("#pfCancel").addEventListener("click", closePopover);
     if(editing) root.querySelector("#pfDelete").addEventListener("click", ()=>{
@@ -1332,7 +1434,7 @@ function renderPomodoro(){
     b.addEventListener("click", ()=> switchTimerType(b.dataset.timerMode)));
 
   const sel = document.getElementById("pomoSubject");
-  sel.innerHTML = `<option value="">General / no subject</option>` + state.subjects.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+  initSelect(sel, [{value:"",label:"General / no subject"}].concat(state.subjects.map(s=>({value:s.id,label:s.name}))), "");
   const isPomo = timer.timerType==="pomodoro";
   document.getElementById("durRow").style.display = isPomo ? "flex" : "none";
   document.getElementById("swHint").style.display = isPomo ? "none" : "block";
@@ -1619,16 +1721,14 @@ function openTaskEditModal(catId, groupId, taskId, anchor){
     <div class="row">
       <label class="field">Due date<input class="input" type="date" id="tfDue" value="${t.due||''}"></label>
       <label class="field">Priority
-        <select class="input" id="tfPriority">
-          <option value="0" ${t.priority===0?'selected':''}>None</option>
-          <option value="1" ${t.priority===1?'selected':''}>P1 — High</option>
-          <option value="2" ${t.priority===2?'selected':''}>P2 — Medium</option>
-          <option value="3" ${t.priority===3?'selected':''}>P3 — Low</option>
-        </select>
+        <div class="input" id="tfPriority"></div>
       </label>
     </div>
     <div class="modal-actions"><button class="btn" id="tfCancel">Cancel</button><button class="btn btn-primary" id="tfSave">Save</button></div>`;
   openPopover(anchor, "Edit task", body, root=>{
+    initSelect(root.querySelector("#tfPriority"), [
+      {value:0,label:"None"}, {value:1,label:"P1 — High"}, {value:2,label:"P2 — Medium"}, {value:3,label:"P3 — Low"}
+    ], t.priority);
     root.querySelector("#tfCancel").addEventListener("click", closePopover);
     root.querySelector("#tfSave").addEventListener("click", ()=>{
       t.title = root.querySelector("#tfTitle").value.trim() || t.title;
@@ -1861,7 +1961,7 @@ function openMarkModal(markId, anchor, presetSubjectId){
   const editing = markId ? state.marks.find(m=>m.id===markId) : null;
   const body = `
     <label class="field">Subject
-      <select class="input" id="mfSubject">${state.subjects.map(s=>`<option value="${s.id}" ${(editing?editing.subjectId===s.id:presetSubjectId===s.id)?'selected':''}>${escapeHtml(s.name)}</option>`).join("")}</select>
+      <div class="input" id="mfSubject"></div>
     </label>
     <label class="field">Assessment name<input class="input" id="mfName" value="${editing?escapeHtml(editing.name):''}" placeholder="e.g. Topic 3 test"></label>
     <div class="row">
@@ -1877,6 +1977,7 @@ function openMarkModal(markId, anchor, presetSubjectId){
       <button class="btn" id="mfCancel">Cancel</button><button class="btn btn-primary" id="mfSave">Save</button>
     </div>`;
   openPopover(anchor, editing?"Edit mark":"Add mark", body, root=>{
+    initSelect(root.querySelector("#mfSubject"), state.subjects.map(s=>({value:s.id,label:s.name})), editing?editing.subjectId:presetSubjectId);
     root.querySelector("#mfCancel").addEventListener("click", closePopover);
     if(editing) root.querySelector("#mfDelete").addEventListener("click", ()=>{
       state.marks = state.marks.filter(m=>m.id!==editing.id); save(); closePopover(); renderMarks();
@@ -1950,14 +2051,19 @@ function renderGoalProgress(){
     </div>`;
   }).join("");
 }
+let trendSubjectId = null;
 function renderTrendChart(){
   const sel = document.getElementById("trendSubject");
+  const subjOpts = state.subjects.map(s=>({value:s.id, label:s.name}));
+  if(!trendSubjectId || !state.subjects.find(s=>s.id===trendSubjectId)) trendSubjectId = subjOpts.length ? subjOpts[0].value : "";
   if(!sel.dataset.wired){
-    sel.addEventListener("change", renderTrendChart);
+    initSelect(sel, subjOpts, trendSubjectId, v=>{ trendSubjectId = v; renderTrendChart(); });
     sel.dataset.wired = "1";
+  } else {
+    sel.cselOptions = subjOpts;
+    sel.value = trendSubjectId;
   }
-  sel.innerHTML = state.subjects.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
-  const subjId = sel.value;
+  const subjId = trendSubjectId;
   const entries = state.marks.filter(m=>m.subjectId===subjId && m.score!=null).sort((a,b)=>a.date.localeCompare(b.date));
   const box = document.getElementById("chartTrend");
   if(entries.length<2){ box.innerHTML = `<div class="empty">Need at least 2 scored assessments for this subject.</div>`; return; }
