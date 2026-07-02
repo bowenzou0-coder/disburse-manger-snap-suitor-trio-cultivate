@@ -606,11 +606,16 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
           <input type="file" id="importFile" accept="application/json" style="display:none;">
           <button class="btn btn-danger" id="resetBtn">Reset all data</button>
         </div>
+        <div class="card">
+          <div class="section-title">Sync across devices</div>
+          <div id="syncPanel"></div>
+        </div>
       </div>
     </section>
   </main>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 (function(){
 "use strict";
@@ -657,7 +662,144 @@ function loadState(){
     return Object.assign({}, d, parsed, { settings: Object.assign({}, d.settings, parsed.settings||{}) });
   }catch(e){ return defaultState(); }
 }
-function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
+function save(){ localStorage.setItem(KEY, JSON.stringify(state)); schedulePush(); }
+
+/* ===================== sync (Supabase, optional) ===================== */
+const SYNC_CFG_KEY = "keystone.syncCfg";
+let syncCfg = null;
+try{ syncCfg = JSON.parse(localStorage.getItem(SYNC_CFG_KEY)||"null"); }catch(e){ syncCfg = null; }
+let sb = null;
+let syncSession = null;
+let syncStatus = "idle"; // idle | checking | synced | error
+let pushDebounceTimer = null;
+
+function hasMeaningfulData(){
+  return state.tasks.some(c=>c.tasks.length || c.groups.some(g=>g.tasks.length))
+    || state.marks.length>0 || state.sessions.length>0 || state.timetable.length>0
+    || (state.notes && state.notes.trim().length>0);
+}
+function initSync(){
+  if(!syncCfg || !syncCfg.url || !syncCfg.anonKey) return;
+  if(typeof window.supabase==="undefined"){ syncStatus="error"; return; }
+  try{
+    sb = window.supabase.createClient(syncCfg.url, syncCfg.anonKey);
+  }catch(e){ syncStatus="error"; return; }
+  sb.auth.onAuthStateChange((event, session)=>{
+    syncSession = session;
+    if(event==="SIGNED_IN" || (event==="INITIAL_SESSION" && session)) handleSignedIn();
+    if(event==="SIGNED_OUT"){ syncSession=null; syncStatus="idle"; if(document.getElementById("syncPanel")) renderSyncPanel(); }
+  });
+}
+async function handleSignedIn(){
+  syncStatus = "checking";
+  if(document.getElementById("syncPanel")) renderSyncPanel();
+  const { data, error } = await sb.from("user_state").select("data,updated_at").eq("user_id", syncSession.user.id).maybeSingle();
+  if(error){ syncStatus="error"; toast("Sync error: "+error.message); if(document.getElementById("syncPanel")) renderSyncPanel(); return; }
+  if(data){
+    if(hasMeaningfulData()) openSyncConflictModal(data);
+    else applyRemoteState(data.data);
+  } else {
+    await pushStateToCloud();
+  }
+  syncStatus = "synced";
+  if(document.getElementById("syncPanel")) renderSyncPanel();
+}
+function applyRemoteState(remoteData){
+  const d = defaultState();
+  state = Object.assign({}, d, remoteData, { settings: Object.assign({}, d.settings, remoteData.settings||{}) });
+  localStorage.setItem(KEY, JSON.stringify(state));
+  toast("Pulled your synced data — reloading…");
+  setTimeout(()=> location.reload(), 600);
+}
+async function pushStateToCloud(){
+  if(!sb || !syncSession) return;
+  const { error } = await sb.from("user_state").upsert({ user_id: syncSession.user.id, data: state, updated_at: new Date().toISOString() });
+  if(error){ syncStatus="error"; } else { syncStatus="synced"; }
+  if(document.getElementById("syncPanel")) renderSyncPanel();
+}
+function schedulePush(){
+  if(!sb || !syncSession) return;
+  clearTimeout(pushDebounceTimer);
+  pushDebounceTimer = setTimeout(pushStateToCloud, 2000);
+}
+function openSyncConflictModal(remoteRow){
+  const remoteDate = new Date(remoteRow.updated_at).toLocaleString();
+  const body = `
+    <p style="font-size:13px; color:var(--text-dim); margin-bottom:16px;">This device already has data on it, and there's separately synced data from <b>${escapeHtml(remoteDate)}</b>. Which one should this device use?</p>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <button class="btn btn-primary" id="syncUseCloud">Use the synced data (replaces what's on this device)</button>
+      <button class="btn" id="syncKeepLocal">Keep this device's data (replaces the synced copy)</button>
+      <button class="btn btn-danger" id="syncCancelBtn">Don't sync this device</button>
+    </div>`;
+  openModal("Sync conflict", body, root=>{
+    root.querySelector("#syncUseCloud").addEventListener("click", ()=>{ closeModal(); applyRemoteState(remoteRow.data); });
+    root.querySelector("#syncKeepLocal").addEventListener("click", async ()=>{ closeModal(); await pushStateToCloud(); toast("This device's data is now the synced copy."); });
+    root.querySelector("#syncCancelBtn").addEventListener("click", async ()=>{ closeModal(); if(sb) await sb.auth.signOut(); });
+  });
+}
+function renderSyncPanel(){
+  const el = document.getElementById("syncPanel");
+  if(!el) return;
+  if(!syncCfg){
+    el.innerHTML = `
+      <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Connect a free Supabase project to sync your data across devices.</p>
+      <label class="field">Project URL<input class="input" id="syncUrl" placeholder="https://xxxx.supabase.co"></label>
+      <label class="field">Anon public key<input class="input" id="syncKey" placeholder="eyJ..."></label>
+      <button class="btn btn-primary" id="syncConnectBtn">Connect</button>`;
+    el.querySelector("#syncConnectBtn").addEventListener("click", ()=>{
+      const url = el.querySelector("#syncUrl").value.trim();
+      const key = el.querySelector("#syncKey").value.trim();
+      if(!url || !key){ toast("Enter both the project URL and anon key"); return; }
+      syncCfg = {url, anonKey:key};
+      localStorage.setItem(SYNC_CFG_KEY, JSON.stringify(syncCfg));
+      initSync();
+      renderSyncPanel();
+    });
+    return;
+  }
+  if(!syncSession){
+    el.innerHTML = `
+      <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Sign in with your email to sync — we'll send a one-time code, no password.</p>
+      <label class="field">Email<input class="input" id="syncEmail" type="email" placeholder="you@example.com"></label>
+      <button class="btn btn-primary" id="syncSendCode">Send code</button>
+      <div id="syncOtpWrap" style="display:none; margin-top:12px;">
+        <label class="field">6-digit code<input class="input" id="syncOtp" inputmode="numeric" placeholder="123456"></label>
+        <button class="btn btn-primary" id="syncVerify">Verify &amp; sign in</button>
+      </div>
+      <button class="btn btn-sm" id="syncForget" style="margin-top:12px;">Use a different project</button>`;
+    el.querySelector("#syncSendCode").addEventListener("click", async ()=>{
+      const email = el.querySelector("#syncEmail").value.trim();
+      if(!email){ toast("Enter your email first"); return; }
+      const btn = el.querySelector("#syncSendCode"); btn.textContent = "Sending…"; btn.disabled = true;
+      const { error } = await sb.auth.signInWithOtp({ email });
+      btn.textContent = "Send code"; btn.disabled = false;
+      if(error){ toast("Couldn't send code: "+error.message); return; }
+      el.querySelector("#syncOtpWrap").style.display = "block";
+      toast("Check your email for the code");
+    });
+    el.querySelector("#syncVerify").addEventListener("click", async ()=>{
+      const email = el.querySelector("#syncEmail").value.trim();
+      const token = el.querySelector("#syncOtp").value.trim();
+      if(!token){ toast("Enter the code from your email"); return; }
+      const btn = el.querySelector("#syncVerify"); btn.textContent = "Verifying…"; btn.disabled = true;
+      const { error } = await sb.auth.verifyOtp({ email, token, type:"email" });
+      btn.textContent = "Verify & sign in"; btn.disabled = false;
+      if(error){ toast("Couldn't verify: "+error.message); return; }
+    });
+    el.querySelector("#syncForget").addEventListener("click", ()=>{
+      if(confirm("Disconnect this Supabase project? Your data stays as-is, both locally and in the cloud.")){
+        localStorage.removeItem(SYNC_CFG_KEY); syncCfg=null; sb=null; syncSession=null; renderSyncPanel();
+      }
+    });
+    return;
+  }
+  const statusText = syncStatus==="checking" ? "Checking…" : syncStatus==="error" ? "Sync error — will retry" : "Synced";
+  el.innerHTML = `
+    <div style="font-size:13px; margin-bottom:4px;">Signed in as <b>${escapeHtml(syncSession.user.email)}</b></div>
+    <div class="badge ${syncStatus==='error'?'badge-danger':'badge-success'}" style="margin-bottom:14px;">${statusText}</div><br>
+    <button class="btn" id="syncSignOut">Sign out</button>`;
+  el.querySelector("#syncSignOut").addEventListener("click", async ()=>{ await sb.auth.signOut(); });
+}
 
 /* ===================== helpers ===================== */
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
@@ -2458,6 +2600,7 @@ function renderHeatmap(){
 
 /* ===================== SETTINGS ===================== */
 function renderSettings(){
+  renderSyncPanel();
   document.getElementById("subjList").innerHTML = state.subjects.map(s=>`
     <div class="subj-row">
       <input type="color" class="color-input" value="${s.color}" data-subj-color="${s.id}">
@@ -2558,6 +2701,7 @@ document.getElementById("resetBtn").addEventListener("click", ()=>{
 function init(){
   renderNav();
   applyTheme();
+  initSync();
   const startTab = state.settings.lastTab || "overview";
   switchTab(startTab);
   setInterval(()=>{
