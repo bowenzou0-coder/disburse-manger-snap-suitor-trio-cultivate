@@ -672,6 +672,7 @@ let sb = null;
 let syncSession = null;
 let syncStatus = "idle"; // idle | checking | synced | error
 let pushDebounceTimer = null;
+let syncDanceDone = false; // the fetch/conflict/pull dance runs once per real sign-in, never on plain page loads
 
 function hasMeaningfulData(){
   return state.tasks.some(c=>c.tasks.length || c.groups.some(g=>g.tasks.length))
@@ -688,8 +689,22 @@ async function initSync(){
   }catch(e){ syncStatus="error"; return; }
   sb.auth.onAuthStateChange((event, session)=>{
     syncSession = session;
-    if(event==="SIGNED_IN" || (event==="INITIAL_SESSION" && session)) handleSignedIn();
-    if(event==="SIGNED_OUT"){ syncSession=null; syncStatus="idle"; if(document.getElementById("syncPanel")) renderSyncPanel(); }
+    if(event==="SIGNED_IN"){
+      // A real, brand-new sign-in (magic link / OTP just completed) — run the
+      // one-time pull/conflict dance.
+      handleSignedIn();
+    } else if(event==="INITIAL_SESSION" && session){
+      // Fires on every normal page load once a session is already persisted.
+      // Do NOT re-run the pull/conflict dance here — it already ran the first
+      // time this device signed in, and re-running it on every load (which
+      // could reload the page) caused a reload loop. Just resume pushing
+      // local changes to the cloud.
+      syncStatus = "synced";
+      if(document.getElementById("syncPanel")) renderSyncPanel();
+    } else if(event==="SIGNED_OUT"){
+      syncSession=null; syncStatus="idle"; syncDanceDone=false;
+      if(document.getElementById("syncPanel")) renderSyncPanel();
+    }
   });
 
   const params = new URLSearchParams(window.location.search);
@@ -714,15 +729,24 @@ async function initSync(){
       const { error } = await sb.auth.setSession({ access_token: hashAccessToken, refresh_token: hashRefreshToken });
       if(error) toast("Couldn't complete sign-in: "+error.message);
     } else {
-      // no link/code in the URL — just restore any existing session as usual
+      // no link/code in the URL — just restore any existing session as usual.
+      // (onAuthStateChange's INITIAL_SESSION event handles this same case too;
+      // this is a fast-path so the UI doesn't wait on that async event. Either
+      // way, no pull/conflict dance here — see the guard in handleSignedIn.)
       const { data } = await sb.auth.getSession();
-      if(data.session){ syncSession = data.session; handleSignedIn(); }
+      if(data.session){
+        syncSession = data.session;
+        syncStatus = "synced";
+        if(document.getElementById("syncPanel")) renderSyncPanel();
+      }
     }
   }catch(e){
     toast("Sign-in failed: "+(e && e.message ? e.message : "unknown error"));
   }
 }
 async function handleSignedIn(){
+  if(syncDanceDone) return;
+  syncDanceDone = true;
   syncStatus = "checking";
   if(document.getElementById("syncPanel")) renderSyncPanel();
   const { data, error } = await sb.from("user_state").select("data,updated_at").eq("user_id", syncSession.user.id).maybeSingle();
