@@ -764,8 +764,15 @@ function applyRemoteState(remoteData){
   const d = defaultState();
   state = Object.assign({}, d, remoteData, { settings: Object.assign({}, d.settings, remoteData.settings||{}) });
   localStorage.setItem(KEY, JSON.stringify(state));
-  toast("Pulled your synced data — reloading…");
-  setTimeout(()=> location.reload(), 600);
+  toast("Pulled your synced data");
+  // Refresh in place rather than reloading the page — a real page reload here
+  // was the root of a reload loop, since restoring the page re-triggers the
+  // exact same "just signed in" state on some browsers/PWA setups.
+  applyTheme();
+  renderNav();
+  renderStreakChip();
+  switchTab(state.settings.lastTab || "overview");
+  if(document.getElementById("syncPanel")) renderSyncPanel();
 }
 async function pushStateToCloud(){
   if(!sb || !syncSession) return;
@@ -817,23 +824,23 @@ function renderSyncPanel(){
     el.innerHTML = `
       <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Sign in with your email to sync — no password.</p>
       <label class="field">Email<input class="input" id="syncEmail" type="email" placeholder="you@example.com"></label>
-      <button class="btn btn-primary" id="syncSendCode">Send sign-in link</button>
+      <button class="btn btn-primary" id="syncSendCode">Send code</button>
       <div id="syncSentWrap" style="display:none; margin-top:12px;">
-        <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:10px;">Check your email and click the sign-in link — it'll bring you right back here, signed in. (If your email shows a 6-digit code instead of a link, enter it below.)</p>
-        <label class="field">Code <span style="font-weight:400;">(only if you got one)</span><input class="input" id="syncOtp" inputmode="numeric" placeholder="123456"></label>
-        <button class="btn" id="syncVerify">Verify code</button>
+        <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:10px;">Enter the 6-digit code from the email.</p>
+        <label class="field">Code<input class="input" id="syncOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"></label>
+        <button class="btn btn-primary" id="syncVerify">Verify code</button>
       </div>
       <button class="btn btn-sm" id="syncForget" style="margin-top:12px;">Use a different project</button>`;
     el.querySelector("#syncSendCode").addEventListener("click", async ()=>{
       const email = el.querySelector("#syncEmail").value.trim();
       if(!email){ toast("Enter your email first"); return; }
       const btn = el.querySelector("#syncSendCode"); btn.textContent = "Sending…"; btn.disabled = true;
-      const redirectTo = window.location.origin + window.location.pathname;
-      const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: redirectTo } });
-      btn.textContent = "Send sign-in link"; btn.disabled = false;
+      const { error } = await sb.auth.signInWithOtp({ email, options:{ shouldCreateUser:true } });
+      btn.textContent = "Send code"; btn.disabled = false;
       if(error){ toast("Couldn't send: "+error.message); return; }
       el.querySelector("#syncSentWrap").style.display = "block";
-      toast("Check your email");
+      el.querySelector("#syncOtp").focus();
+      toast("Check your email for the code");
     });
     el.querySelector("#syncVerify").addEventListener("click", async ()=>{
       const email = el.querySelector("#syncEmail").value.trim();
