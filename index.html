@@ -160,6 +160,7 @@ h1,h2,h3,p{margin:0;}
 .btn-danger{color:var(--danger); border-color:var(--danger-soft);}
 .btn-danger:hover{background:var(--danger-soft);}
 .btn-sm{padding:5px 10px; font-size:12.5px;}
+.modal .btn, #syncPanel .btn { white-space:normal; overflow-wrap:anywhere; height:auto; text-align:center; }
 .btn-icon{padding:6px; width:30px; height:30px; justify-content:center;}
 .input,select,textarea{
   width:100%; padding:8px 11px; border-radius:var(--radius-sm); border:1px solid var(--border);
@@ -674,13 +675,20 @@ function save(){ localStorage.setItem(KEY, JSON.stringify(state)); schedulePush(
 
 /* ===================== sync (Supabase, optional) ===================== */
 const SYNC_CFG_KEY = "keystone.syncCfg";
+const SYNC_WATERMARK_KEY = "keystone.lastSyncedAt";
 let syncCfg = null;
 try{ syncCfg = JSON.parse(localStorage.getItem(SYNC_CFG_KEY)||"null"); }catch(e){ syncCfg = null; }
 let sb = null;
 let syncSession = null;
 let syncStatus = "idle"; // idle | checking | synced | error
 let pushDebounceTimer = null;
-let syncDanceDone = false; // the fetch/conflict/pull dance runs once per real sign-in, never on plain page loads
+let syncInFlight = false;
+// The timestamp of the last cloud state we know this device has (pulled or pushed).
+// Sync is plain last-write-wins compared against this — no user prompt on every
+// open. This is safe for one person's own data across their own devices, where
+// only one device is ever actually being typed into at a time.
+let lastSyncedAt = localStorage.getItem(SYNC_WATERMARK_KEY) || null;
+function setSyncWatermark(iso){ lastSyncedAt = iso; localStorage.setItem(SYNC_WATERMARK_KEY, iso); }
 
 function hasMeaningfulData(){
   return state.tasks.some(c=>c.tasks.length || c.groups.some(g=>g.tasks.length))
@@ -697,23 +705,21 @@ async function initSync(){
   }catch(e){ syncStatus="error"; return; }
   sb.auth.onAuthStateChange((event, session)=>{
     syncSession = session;
-    if(event==="SIGNED_IN"){
-      // A real, brand-new sign-in (magic link / OTP just completed) — run the
-      // one-time pull/conflict dance.
-      handleSignedIn();
-    } else if(event==="INITIAL_SESSION" && session){
-      // Fires on every normal page load once a session is already persisted.
-      // Do NOT re-run the pull/conflict dance here — it already ran the first
-      // time this device signed in, and re-running it on every load (which
-      // could reload the page) caused a reload loop. Just resume pushing
-      // local changes to the cloud.
-      syncStatus = "synced";
-      if(document.getElementById("syncPanel")) renderSyncPanel();
+    if(event==="SIGNED_IN" || (event==="INITIAL_SESSION" && session)){
+      // Fires both right after a fresh sign-in AND on every normal page load
+      // where a session is already persisted — syncNow() is cheap and safe to
+      // call every time (it no-ops if the cloud copy isn't newer than what we
+      // already have), so every app open silently catches up instead of
+      // trusting a stale "Synced" badge.
+      syncNow();
     } else if(event==="SIGNED_OUT"){
-      syncSession=null; syncStatus="idle"; syncDanceDone=false;
+      syncSession=null; syncStatus="idle";
+      lastSyncedAt=null; localStorage.removeItem(SYNC_WATERMARK_KEY);
       if(document.getElementById("syncPanel")) renderSyncPanel();
     }
   });
+  document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") syncNow(); });
+  window.addEventListener("focus", ()=> syncNow());
 
   const params = new URLSearchParams(window.location.search);
   const code = params.get("code");
@@ -736,42 +742,45 @@ async function initSync(){
       history.replaceState(null, "", window.location.pathname);
       const { error } = await sb.auth.setSession({ access_token: hashAccessToken, refresh_token: hashRefreshToken });
       if(error) toast("Couldn't complete sign-in: "+error.message);
-    } else {
-      // no link/code in the URL — just restore any existing session as usual.
-      // (onAuthStateChange's INITIAL_SESSION event handles this same case too;
-      // this is a fast-path so the UI doesn't wait on that async event. Either
-      // way, no pull/conflict dance here — see the guard in handleSignedIn.)
-      const { data } = await sb.auth.getSession();
-      if(data.session){
-        syncSession = data.session;
-        syncStatus = "synced";
-        if(document.getElementById("syncPanel")) renderSyncPanel();
-      }
     }
+    // No code/hash in the URL: nothing to do here — onAuthStateChange's
+    // INITIAL_SESSION event (above) restores any existing session on its own.
   }catch(e){
     toast("Sign-in failed: "+(e && e.message ? e.message : "unknown error"));
   }
 }
-async function handleSignedIn(){
-  if(syncDanceDone) return;
-  syncDanceDone = true;
+async function syncNow(){
+  if(!sb || !syncSession || syncInFlight) return;
+  if(pushDebounceTimer) return; // a local edit is queued to push — let that go first, don't clobber it with a pull
+  syncInFlight = true;
   syncStatus = "checking";
   if(document.getElementById("syncPanel")) renderSyncPanel();
   const { data, error } = await sb.from("user_state").select("data,updated_at").eq("user_id", syncSession.user.id).maybeSingle();
-  if(error){ syncStatus="error"; toast("Sync error: "+error.message); if(document.getElementById("syncPanel")) renderSyncPanel(); return; }
+  if(error){ syncStatus="error"; syncInFlight=false; if(document.getElementById("syncPanel")) renderSyncPanel(); return; }
   if(data){
-    if(hasMeaningfulData()) openSyncConflictModal(data);
-    else applyRemoteState(data.data);
+    if(!lastSyncedAt && hasMeaningfulData()){
+      // The one genuinely ambiguous case: this device has never synced before
+      // AND already has real data of its own. Ask once — every sync after
+      // this is silent last-write-wins using the watermark.
+      syncInFlight = false;
+      openSyncConflictModal(data);
+      return;
+    }
+    if(!lastSyncedAt || new Date(data.updated_at) > new Date(lastSyncedAt)){
+      applyRemoteState(data.data, data.updated_at);
+    }
   } else {
     await pushStateToCloud();
   }
   syncStatus = "synced";
+  syncInFlight = false;
   if(document.getElementById("syncPanel")) renderSyncPanel();
 }
-function applyRemoteState(remoteData){
+function applyRemoteState(remoteData, updatedAt){
   const d = defaultState();
   state = Object.assign({}, d, remoteData, { settings: Object.assign({}, d.settings, remoteData.settings||{}) });
   localStorage.setItem(KEY, JSON.stringify(state));
+  setSyncWatermark(updatedAt || new Date().toISOString());
   toast("Pulled your synced data");
   // Refresh in place rather than reloading the page — a real page reload here
   // was the root of a reload loop, since restoring the page re-triggers the
@@ -784,26 +793,27 @@ function applyRemoteState(remoteData){
 }
 async function pushStateToCloud(){
   if(!sb || !syncSession) return;
-  const { error } = await sb.from("user_state").upsert({ user_id: syncSession.user.id, data: state, updated_at: new Date().toISOString() });
-  if(error){ syncStatus="error"; } else { syncStatus="synced"; }
+  const nowIso = new Date().toISOString();
+  const { error } = await sb.from("user_state").upsert({ user_id: syncSession.user.id, data: state, updated_at: nowIso });
+  if(error){ syncStatus="error"; } else { syncStatus="synced"; setSyncWatermark(nowIso); }
   if(document.getElementById("syncPanel")) renderSyncPanel();
 }
 function schedulePush(){
   if(!sb || !syncSession) return;
   clearTimeout(pushDebounceTimer);
-  pushDebounceTimer = setTimeout(pushStateToCloud, 2000);
+  pushDebounceTimer = setTimeout(()=>{ pushDebounceTimer = null; pushStateToCloud(); }, 2000);
 }
 function openSyncConflictModal(remoteRow){
   const remoteDate = new Date(remoteRow.updated_at).toLocaleString();
   const body = `
-    <p style="font-size:13px; color:var(--text-dim); margin-bottom:16px;">This device already has data on it, and there's separately synced data from <b>${escapeHtml(remoteDate)}</b>. Which one should this device use?</p>
+    <p style="font-size:13px; color:var(--text-dim); margin-bottom:16px;">This device already has data on it, and there's separately synced data from <b>${escapeHtml(remoteDate)}</b>. Which one should this device use? (This choice only happens once — after this, syncing is automatic.)</p>
     <div style="display:flex; flex-direction:column; gap:8px;">
-      <button class="btn btn-primary" id="syncUseCloud">Use the synced data (replaces what's on this device)</button>
-      <button class="btn" id="syncKeepLocal">Keep this device's data (replaces the synced copy)</button>
-      <button class="btn btn-danger" id="syncCancelBtn">Don't sync this device</button>
+      <button class="btn btn-primary" id="syncUseCloud">Use synced data</button>
+      <button class="btn" id="syncKeepLocal">Keep this device's data</button>
+      <button class="btn btn-danger" id="syncCancelBtn">Don't sync</button>
     </div>`;
   openModal("Sync conflict", body, root=>{
-    root.querySelector("#syncUseCloud").addEventListener("click", ()=>{ closeModal(); applyRemoteState(remoteRow.data); });
+    root.querySelector("#syncUseCloud").addEventListener("click", ()=>{ closeModal(); applyRemoteState(remoteRow.data, remoteRow.updated_at); });
     root.querySelector("#syncKeepLocal").addEventListener("click", async ()=>{ closeModal(); await pushStateToCloud(); toast("This device's data is now the synced copy."); });
     root.querySelector("#syncCancelBtn").addEventListener("click", async ()=>{ closeModal(); if(sb) await sb.auth.signOut(); });
   });
@@ -832,7 +842,7 @@ function renderSyncPanel(){
     el.innerHTML = `
       <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Sign in with your email to sync — no password.</p>
       <label class="field">Email<input class="input" id="syncEmail" type="email" placeholder="you@example.com"></label>
-      <button class="btn btn-primary" id="syncSendCode">Send code</button>
+      <button class="btn btn-primary" id="syncSendCode" style="min-width:110px;">Send code</button>
       <div id="syncSentWrap" style="display:none; margin-top:12px;">
         <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:10px;">Enter the 6-digit code from the email.</p>
         <label class="field">Code<input class="input" id="syncOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"></label>
@@ -891,7 +901,7 @@ function renderSyncPanel(){
   }
   const statusText = syncStatus==="checking" ? "Checking…" : syncStatus==="error" ? "Sync error — will retry" : "Synced";
   el.innerHTML = `
-    <div style="font-size:13px; margin-bottom:4px;">Signed in as <b>${escapeHtml(syncSession.user.email)}</b></div>
+    <div style="font-size:13px; margin-bottom:4px; overflow-wrap:anywhere;">Signed in as <b>${escapeHtml(syncSession.user.email)}</b></div>
     <div class="badge ${syncStatus==='error'?'badge-danger':'badge-success'}" style="margin-bottom:14px;">${statusText}</div><br>
     <button class="btn" id="syncSignOut">Sign out</button>`;
   el.querySelector("#syncSignOut").addEventListener("click", async ()=>{ await sb.auth.signOut(); });
