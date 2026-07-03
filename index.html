@@ -397,6 +397,14 @@ hr.sep{border:none; border-top:1px solid var(--border); margin:14px 0;}
 
 ::-webkit-scrollbar{width:9px; height:9px;}
 ::-webkit-scrollbar-thumb{background:var(--border); border-radius:99px;}
+
+/* iOS Safari auto-zooms the page when a focused text field's font-size is under
+   16px — force every real text input/textarea/select up to 16px on phone widths
+   so typing doesn't trigger that zoom. (!important beats the more specific
+   desktop rules above, which we don't want to touch since this is phone-only.) */
+@media (max-width:700px){
+  input, select, textarea{ font-size:16px !important; }
+}
 </style>
 </head>
 <body>
