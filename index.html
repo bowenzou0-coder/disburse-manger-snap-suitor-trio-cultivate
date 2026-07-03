@@ -831,16 +831,35 @@ function renderSyncPanel(){
         <button class="btn btn-primary" id="syncVerify">Verify code</button>
       </div>
       <button class="btn btn-sm" id="syncForget" style="margin-top:12px;">Use a different project</button>`;
+    let resendCooldown = null;
+    function startResendCooldown(seconds){
+      const btn = el.querySelector("#syncSendCode");
+      if(!btn) return;
+      clearInterval(resendCooldown);
+      let remaining = seconds;
+      btn.disabled = true;
+      btn.textContent = `Resend in ${remaining}s`;
+      resendCooldown = setInterval(()=>{
+        remaining--;
+        if(remaining <= 0){ clearInterval(resendCooldown); btn.disabled = false; btn.textContent = "Resend code"; return; }
+        btn.textContent = `Resend in ${remaining}s`;
+      }, 1000);
+    }
     el.querySelector("#syncSendCode").addEventListener("click", async ()=>{
       const email = el.querySelector("#syncEmail").value.trim();
       if(!email){ toast("Enter your email first"); return; }
       const btn = el.querySelector("#syncSendCode"); btn.textContent = "Sending…"; btn.disabled = true;
       const { error } = await sb.auth.signInWithOtp({ email, options:{ shouldCreateUser:true } });
-      btn.textContent = "Send code"; btn.disabled = false;
-      if(error){ toast("Couldn't send: "+error.message); return; }
+      if(error){
+        btn.textContent = "Send code"; btn.disabled = false;
+        if(error.status===429 || /rate.?limit/i.test(error.message)) toast("Too many emails sent — wait a minute and try again");
+        else toast("Couldn't send: "+error.message);
+        return;
+      }
       el.querySelector("#syncSentWrap").style.display = "block";
       el.querySelector("#syncOtp").focus();
       toast("Check your email for the code");
+      startResendCooldown(60); // matches Supabase's server-side per-address cooldown
     });
     el.querySelector("#syncVerify").addEventListener("click", async ()=>{
       const email = el.querySelector("#syncEmail").value.trim();
@@ -849,7 +868,11 @@ function renderSyncPanel(){
       const btn = el.querySelector("#syncVerify"); btn.textContent = "Verifying…"; btn.disabled = true;
       const { error } = await sb.auth.verifyOtp({ email, token, type:"email" });
       btn.textContent = "Verify code"; btn.disabled = false;
-      if(error){ toast("Couldn't verify: "+error.message); return; }
+      if(error){
+        if(/expired/i.test(error.message)) toast("Code expired or incorrect — send a new one");
+        else toast("Couldn't verify: "+error.message);
+        return;
+      }
     });
     el.querySelector("#syncForget").addEventListener("click", ()=>{
       if(confirm("Disconnect this Supabase project? Your data stays as-is, both locally and in the cloud.")){
