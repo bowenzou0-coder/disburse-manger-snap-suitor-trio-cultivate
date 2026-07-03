@@ -941,6 +941,23 @@ const QA_PRIORITY = [
   {re:/(!p3|!low)/i, level:3, label:"Low"},
 ];
 const QA_REPEAT_RE = /\b(!daily|every\s*day|everyday|daily)\b/i;
+const QA_WORKDAY_RE = /\b(?:every|ev)\s+(work\s*days?|weekdays?)\b/i;
+// Matches "every mon, wed, fri" / "ev mon wed & fri" — a run of weekday tokens
+// right after "every"/"ev", separated by commas/"and"/"&"/whitespace. Stops as
+// soon as a non-weekday word appears, so it doesn't swallow the rest of the title.
+const QA_WEEKLY_LIST_RE = /\b(?:every|ev)\s+((?:mon|tue|wed|thu|fri|sat|sun)[a-z]*(?:\s*(?:,|&|and)?\s*(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*)*)/i;
+function qaFindWeeklyRepeat(text){
+  const m = text.match(QA_WEEKLY_LIST_RE);
+  if(!m) return null;
+  const chunk = m[1];
+  const days = [];
+  for(const w of QA_WEEKDAYS){
+    if(new RegExp("\\b"+w.re.source, "i").test(chunk) && !days.includes(w.day)) days.push(w.day);
+  }
+  if(!days.length) return null;
+  days.sort((a,b)=>a-b);
+  return { days, match: m[0] };
+}
 function qaNextWeekday(targetDow){
   const cur = new Date().getDay();
   return addDays(todayISO(), (targetDow - cur + 7) % 7);
@@ -1006,16 +1023,24 @@ function qaEndOfMonth(){
   return new Date(now.getFullYear(), now.getMonth()+1, 0);
 }
 function parseQuickAdd(raw){
-  let text = raw, due = null, dueLabel = null, priority = 0, priLabel = null, repeat = null;
+  let text = raw, due = null, dueLabel = null, priority = 0, priLabel = null, repeat = null, repeatDays = null;
 
   const dailyMatch = text.match(QA_REPEAT_RE);
   if(dailyMatch){ repeat = "daily"; text = text.replace(dailyMatch[0], ""); }
+  else {
+    const workdayMatch = text.match(QA_WORKDAY_RE);
+    if(workdayMatch){ repeat = "weekday"; text = text.replace(workdayMatch[0], ""); }
+    else {
+      const weekly = qaFindWeeklyRepeat(text);
+      if(weekly){ repeat = "weekly"; repeatDays = weekly.days; text = text.replace(weekly.match, ""); }
+    }
+  }
 
   const todayMatch = text.match(/\b(today|tod|eod|end of day)\b/i);
   const tonightMatch = !todayMatch && text.match(/\btonight\b/i);
   if(todayMatch){ due = todayISO(); dueLabel = "Today"; text = text.replace(todayMatch[0], ""); }
   else if(tonightMatch){ due = todayISO(); dueLabel = "Tonight"; text = text.replace(tonightMatch[0], ""); }
-  else if(/\b(tomorrow|tmrw|tmr)\b/i.test(text)){ due = addDays(todayISO(),1); dueLabel = "Tomorrow"; text = text.replace(/\b(tomorrow|tmrw|tmr)\b/i, ""); }
+  else if(/\b(tomorrow|tmrw|tmr|tom)\b/i.test(text)){ due = addDays(todayISO(),1); dueLabel = "Tomorrow"; text = text.replace(/\b(tomorrow|tmrw|tmr|tom)\b/i, ""); }
   else if(/\bnext week\b/i.test(text)){ due = addDays(todayISO(),7); dueLabel = "Next week"; text = text.replace(/\bnext week\b/i, ""); }
   else {
     const explicitDate = qaFindExplicitDate(text);
@@ -1046,11 +1071,17 @@ function parseQuickAdd(raw){
     if(m){ priority = p.level; priLabel = p.label; text = text.replace(p.re, ""); break; }
   }
   text = text.replace(/\s{2,}/g, " ").trim();
-  return { title: text, due, dueLabel, priority, priLabel, repeat };
+  return { title: text, due, dueLabel, priority, priLabel, repeat, repeatDays };
+}
+function qaRepeatLabel(parsed){
+  if(parsed.repeat==="daily") return "Daily";
+  if(parsed.repeat==="weekday") return "Weekdays";
+  if(parsed.repeat==="weekly" && parsed.repeatDays && parsed.repeatDays.length) return parsed.repeatDays.map(d=>QA_DOW_NAMES[d]).join("/");
+  return "";
 }
 function qaHintHtml(parsed){
   if(!parsed.dueLabel && !parsed.priLabel && !parsed.repeat) return "";
-  return `${parsed.dueLabel?`<span class="badge badge-accent">${parsed.dueLabel}</span>`:""}${parsed.priLabel?`<span class="badge ${parsed.priority===1?'badge-danger':parsed.priority===2?'badge-warn':'badge-muted'}">${parsed.priLabel}</span>`:""}${parsed.repeat?`<span class="badge badge-muted">Daily</span>`:""}`;
+  return `${parsed.dueLabel?`<span class="badge badge-accent">${parsed.dueLabel}</span>`:""}${parsed.priLabel?`<span class="badge ${parsed.priority===1?'badge-danger':parsed.priority===2?'badge-warn':'badge-muted'}">${parsed.priLabel}</span>`:""}${parsed.repeat?`<span class="badge badge-muted">${qaRepeatLabel(parsed)}</span>`:""}`;
 }
 
 function renderStreakChip(){
@@ -1579,14 +1610,15 @@ function commitImport(mode){
 }
 
 /* ===================== active-days / streak ===================== */
-// Daily-repeat tasks track every completion date (so history/streak stays intact
-// across days), while ordinary tasks keep the simple done/completedAt pair.
+// Repeating tasks (daily / weekday / weekly-on-specific-days) track every
+// completion date (so history/streak stays intact across days), while
+// ordinary tasks keep the simple done/completedAt pair.
 function taskDoneToday(t){
-  if(t.repeat==="daily") return (t.completedDates||[]).includes(todayISO());
+  if(t.repeat) return (t.completedDates||[]).includes(todayISO());
   return !!t.done;
 }
 function setTaskDoneToday(t, done){
-  if(t.repeat==="daily"){
+  if(t.repeat){
     t.completedDates = t.completedDates || [];
     const idx = t.completedDates.indexOf(todayISO());
     if(done && idx===-1) t.completedDates.push(todayISO());
@@ -1597,14 +1629,31 @@ function setTaskDoneToday(t, done){
   }
 }
 function taskCompletedOnDate(t, date){
-  if(t.repeat==="daily") return (t.completedDates||[]).includes(date);
+  if(t.repeat) return (t.completedDates||[]).includes(date);
   return t.done && t.completedAt===date;
+}
+// Whether a repeating task is actually scheduled on a given date — "daily"
+// always is, "weekday" is Mon–Fri, "weekly" is whichever days were picked.
+// Non-repeating tasks are always "scheduled" (they're just a normal task).
+function taskScheduledOn(t, dateISO){
+  if(!t.repeat) return true;
+  if(t.repeat==="daily") return true;
+  const dow = new Date(dateISO+"T00:00:00").getDay();
+  if(t.repeat==="weekday") return dow>=1 && dow<=5;
+  if(t.repeat==="weekly") return (t.repeatDays||[]).includes(dow);
+  return true;
+}
+function taskRepeatLabel(t){
+  if(t.repeat==="daily") return "Repeats daily";
+  if(t.repeat==="weekday") return "Repeats on weekdays";
+  if(t.repeat==="weekly") return "Repeats "+(t.repeatDays||[]).slice().sort((a,b)=>a-b).map(d=>QA_DOW_NAMES[d]).join("/");
+  return "";
 }
 function getActiveDatesSet(){
   const set = new Set();
   state.sessions.forEach(s=> set.add(s.date));
   const addTask = t=>{
-    if(t.repeat==="daily") (t.completedDates||[]).forEach(d=>set.add(d));
+    if(t.repeat) (t.completedDates||[]).forEach(d=>set.add(d));
     else if(t.done && t.completedAt) set.add(t.completedAt);
   };
   state.tasks.forEach(cat=>{
@@ -2214,8 +2263,10 @@ function renderChecklist(){
 
   const sidebar = document.getElementById("catSidebar");
   ensureActiveCat();
+  const scheduledToday = t=> taskScheduledOn(t, todayISO());
   const catListHtml = state.tasks.map(c=>{
-    const remaining = c.tasks.filter(t=>!taskDoneToday(t)).length + c.groups.reduce((a,g)=>a+g.tasks.filter(t=>!taskDoneToday(t)).length,0);
+    const remaining = c.tasks.filter(scheduledToday).filter(t=>!taskDoneToday(t)).length
+      + c.groups.reduce((a,g)=>a+g.tasks.filter(scheduledToday).filter(t=>!taskDoneToday(t)).length,0);
     return `<div class="cat-item ${c.id===checklistState.activeCat && checklistState.filter==='all'?'active':''}" data-cat="${c.id}">
       <span class="dot" style="background:${c.color}"></span><span>${escapeHtml(c.name)}</span><span class="cat-count">${remaining}</span></div>`;
   }).join("");
@@ -2233,8 +2284,9 @@ function renderChecklist(){
   if(!state.tasks.length){ main.innerHTML = `<div class="empty">Add a category to start building your checklist.</div>`; return; }
   const cat = state.tasks.find(c=>c.id===checklistState.activeCat);
   if(!cat){ main.innerHTML = `<div class="empty">Select a category.</div>`; return; }
-  const totalCount = cat.tasks.length + cat.groups.reduce((a,g)=>a+g.tasks.length,0);
-  const doneCount = cat.tasks.filter(t=>taskDoneToday(t)).length + cat.groups.reduce((a,g)=>a+g.tasks.filter(t=>taskDoneToday(t)).length,0);
+  const totalCount = cat.tasks.filter(scheduledToday).length + cat.groups.reduce((a,g)=>a+g.tasks.filter(scheduledToday).length,0);
+  const doneCount = cat.tasks.filter(scheduledToday).filter(t=>taskDoneToday(t)).length
+    + cat.groups.reduce((a,g)=>a+g.tasks.filter(scheduledToday).filter(t=>taskDoneToday(t)).length,0);
   const pct = totalCount? Math.round(doneCount/totalCount*100):0;
 
   let html = `<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
@@ -2286,11 +2338,12 @@ function renderTaskList(tasks, catId, groupId){
   return tasks.map(t=>{
     const done = taskDoneToday(t);
     const overdue = t.due && !done && t.due<todayISO();
-    return `<div class="task-row">
-      <div class="task-check ${done?'done':''}" data-toggle="${catId}:${groupId||''}:${t.id}">${done?icon('<path d="M20 6L9 17l-5-5"/>',11):''}</div>
+    const notToday = t.repeat && !taskScheduledOn(t, todayISO());
+    return `<div class="task-row" ${notToday?'style="opacity:.5;"':''}>
+      <div class="task-check ${done?'done':''}" data-toggle="${catId}:${groupId||''}:${t.id}" title="${notToday?'Not scheduled today — click to mark it anyway':''}">${done?icon('<path d="M20 6L9 17l-5-5"/>',11):''}</div>
       ${t.priority?`<span class="pri-dot" style="background:${priColors[t.priority]}"></span>`:''}
       <span class="task-title ${done?'done':''}" data-edit-task="${catId}:${groupId||''}:${t.id}">${escapeHtml(t.title)}</span>
-      ${t.repeat==="daily"?`<span class="iconbtn" style="cursor:default; color:var(--text-faint);" title="Repeats daily">${icon('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',13)}</span>`:''}
+      ${t.repeat?`<span class="iconbtn" style="cursor:default; color:var(--text-faint);" title="${escapeHtml(taskRepeatLabel(t))}">${icon('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',13)}</span>`:''}
       ${t.description?`<span class="iconbtn" style="cursor:default; color:var(--text-faint);" title="${escapeHtml(t.description)}">${icon('<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',13)}</span>`:''}
       ${t.due?`<span class="task-due" style="background:${overdue?'var(--danger-soft)':'var(--surface-2)'}; color:${overdue?'var(--danger)':'var(--text-dim)'}">${t.due}</span>`:''}
       <button class="iconbtn" data-del-task="${catId}:${groupId||''}:${t.id}">${icon('<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',13)}</button>
@@ -2326,7 +2379,7 @@ function wireTaskEvents(root){
       if(e.key==="Enter" && e.target.value.trim()){
         const parsed = parseQuickAdd(e.target.value.trim());
         const arr = findTaskArr(el.dataset.newTaskCat, el.dataset.newTaskGroup||null);
-        arr.push({id:uid(), title:parsed.title || e.target.value.trim(), done:false, due:parsed.due, priority:parsed.priority, completedAt:null, repeat:parsed.repeat||null, completedDates:[], description:""});
+        arr.push({id:uid(), title:parsed.title || e.target.value.trim(), done:false, due:parsed.due, priority:parsed.priority, completedAt:null, repeat:parsed.repeat||null, repeatDays:parsed.repeatDays||[], completedDates:[], description:""});
         e.target.value=""; save(); renderChecklist(); renderOverview();
       }
     });
@@ -2343,8 +2396,11 @@ function openTaskEditModal(catId, groupId, taskId, anchor){
         <div class="input" id="tfPriority"></div>
       </label>
     </div>
-    <label class="field"><label class="radio-field" style="margin-bottom:0;"><input type="checkbox" id="tfRepeat" ${t.repeat==="daily"?"checked":""}> Repeats daily</label></label>
-    <label class="field">Description <span style="font-weight:400;">(optional)</span>
+    <label class="field">Repeats
+      <div class="input" id="tfRepeat"></div>
+    </label>
+    <div class="filter-tabs" id="tfRepeatDays" style="display:none; margin-bottom:0; margin-top:8px; flex-wrap:wrap;"></div>
+    <label class="field" style="margin-top:12px;">Description <span style="font-weight:400;">(optional)</span>
       <textarea class="input" id="tfDescription" rows="3" placeholder="Add a note...">${escapeHtml(t.description||"")}</textarea>
     </label>
     <div class="modal-actions"><button class="btn" id="tfCancel">Cancel</button><button class="btn btn-primary" id="tfSave">Save</button></div>`;
@@ -2352,13 +2408,34 @@ function openTaskEditModal(catId, groupId, taskId, anchor){
     initSelect(root.querySelector("#tfPriority"), [
       {value:0,label:"None"}, {value:1,label:"P1 — High"}, {value:2,label:"P2 — Medium"}, {value:3,label:"P3 — Low"}
     ], t.priority);
+    const repeatDaysWrap = root.querySelector("#tfRepeatDays");
+    let pickedDays = new Set(t.repeatDays||[]);
+    function paintDayChips(){
+      repeatDaysWrap.innerHTML = QA_DOW_NAMES.map((name,i)=>
+        `<button type="button" class="${pickedDays.has(i)?'active':''}" data-day="${i}">${name}</button>`).join("");
+      repeatDaysWrap.querySelectorAll("[data-day]").forEach(b=> b.addEventListener("click", ()=>{
+        const d = Number(b.dataset.day);
+        if(pickedDays.has(d)) pickedDays.delete(d); else pickedDays.add(d);
+        paintDayChips();
+      }));
+    }
+    paintDayChips();
+    const initialRepeat = t.repeat || "none";
+    repeatDaysWrap.style.display = initialRepeat==="weekly" ? "flex" : "none";
+    initSelect(root.querySelector("#tfRepeat"), [
+      {value:"none", label:"Doesn't repeat"}, {value:"daily", label:"Every day"},
+      {value:"weekday", label:"Every weekday"}, {value:"weekly", label:"On specific days"}
+    ], initialRepeat, v=>{ repeatDaysWrap.style.display = v==="weekly" ? "flex" : "none"; });
     root.querySelector("#tfCancel").addEventListener("click", closePopover);
     root.querySelector("#tfSave").addEventListener("click", ()=>{
+      const repeatVal = root.querySelector("#tfRepeat").value;
+      if(repeatVal==="weekly" && !pickedDays.size){ toast("Pick at least one day, or choose a different repeat option"); return; }
       t.title = root.querySelector("#tfTitle").value.trim() || t.title;
       t.due = root.querySelector("#tfDue").value || null;
       t.priority = Number(root.querySelector("#tfPriority").value);
-      t.repeat = root.querySelector("#tfRepeat").checked ? "daily" : null;
-      if(t.repeat==="daily" && !t.completedDates) t.completedDates = [];
+      t.repeat = repeatVal==="none" ? null : repeatVal;
+      t.repeatDays = repeatVal==="weekly" ? Array.from(pickedDays).sort((a,b)=>a-b) : [];
+      if(t.repeat && !t.completedDates) t.completedDates = [];
       t.description = root.querySelector("#tfDescription").value.trim();
       save(); closePopover(); renderChecklist(); renderOverview();
     });
@@ -2705,7 +2782,7 @@ function renderTrendChart(){
   box.innerHTML = svg;
 }
 function renderTaskDonut(){
-  const all = allTasks();
+  const all = allTasks().filter(t=> taskScheduledOn(t, todayISO()));
   const done = all.filter(t=>taskDoneToday(t)).length, total = all.length;
   const pct = total? Math.round(done/total*100):0;
   const r=42, c=2*Math.PI*r;
