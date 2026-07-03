@@ -694,18 +694,32 @@ async function initSync(){
 
   const params = new URLSearchParams(window.location.search);
   const code = params.get("code");
-  const authErr = params.get("error_description");
-  if(authErr){
-    toast("Sign-in link error: "+decodeURIComponent(authErr));
-    history.replaceState(null, "", window.location.pathname);
-  } else if(code){
-    history.replaceState(null, "", window.location.pathname);
-    const { error } = await sb.auth.exchangeCodeForSession(code);
-    if(error) toast("Couldn't complete sign-in: "+error.message);
-  } else {
-    // no link/code in the URL — just restore any existing session as usual
-    const { data } = await sb.auth.getSession();
-    if(data.session){ syncSession = data.session; handleSignedIn(); }
+  // Older/implicit-flow links put the tokens after a "#", not a "?" — Supabase
+  // has used both formats depending on project settings, so we handle either.
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const hashAccessToken = hashParams.get("access_token");
+  const hashRefreshToken = hashParams.get("refresh_token");
+  const authErr = params.get("error_description") || hashParams.get("error_description");
+
+  try{
+    if(authErr){
+      toast("Sign-in link error: "+decodeURIComponent(authErr));
+      history.replaceState(null, "", window.location.pathname);
+    } else if(code){
+      history.replaceState(null, "", window.location.pathname);
+      const { error } = await sb.auth.exchangeCodeForSession(code);
+      if(error) toast("Couldn't complete sign-in: "+error.message);
+    } else if(hashAccessToken && hashRefreshToken){
+      history.replaceState(null, "", window.location.pathname);
+      const { error } = await sb.auth.setSession({ access_token: hashAccessToken, refresh_token: hashRefreshToken });
+      if(error) toast("Couldn't complete sign-in: "+error.message);
+    } else {
+      // no link/code in the URL — just restore any existing session as usual
+      const { data } = await sb.auth.getSession();
+      if(data.session){ syncSession = data.session; handleSignedIn(); }
+    }
+  }catch(e){
+    toast("Sign-in failed: "+(e && e.message ? e.message : "unknown error"));
   }
 }
 async function handleSignedIn(){
