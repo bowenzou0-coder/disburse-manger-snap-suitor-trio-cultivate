@@ -936,7 +936,7 @@ const QA_WEEKDAYS = [
 ];
 const QA_MONTHS = {jan:0,january:0,feb:1,february:1,mar:2,march:2,apr:3,april:3,may:4,jun:5,june:5,jul:6,july:6,aug:7,august:7,sep:8,sept:8,september:8,oct:9,october:9,nov:10,november:10,dec:11,december:11};
 const QA_PRIORITY = [
-  {re:/(!p1|!high|\basap\b|\burgent\b)/i, level:1, label:"High"},
+  {re:/(!p1|!high|\basap\b|\burgent\b|(?:^|\s)!!(?=\s|$))/i, level:1, label:"High"},
   {re:/(!p2|!med(ium)?)/i, level:2, label:"Medium"},
   {re:/(!p3|!low)/i, level:3, label:"Low"},
 ];
@@ -987,7 +987,23 @@ function qaFindExplicitDate(text){
     const d = resolveYear(mon, day);
     return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
   }
+  // Bare ordinal with no month attached ("due 27th") — this month, or next month
+  // if that day has already passed, matching Todoist's convention.
+  m = text.match(/\b(\d{1,2})(st|nd|rd|th)\b/i);
+  if(m){
+    const d2 = +m[1];
+    if(d2>=1 && d2<=31){
+      const now = new Date();
+      let d = new Date(now.getFullYear(), now.getMonth(), d2);
+      if(d < startOfToday) d = new Date(now.getFullYear(), now.getMonth()+1, d2);
+      return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
+    }
+  }
   return null;
+}
+function qaEndOfMonth(){
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth()+1, 0);
 }
 function parseQuickAdd(raw){
   let text = raw, due = null, dueLabel = null, priority = 0, priLabel = null, repeat = null;
@@ -995,17 +1011,26 @@ function parseQuickAdd(raw){
   const dailyMatch = text.match(QA_REPEAT_RE);
   if(dailyMatch){ repeat = "daily"; text = text.replace(dailyMatch[0], ""); }
 
-  if(/\btoday\b/i.test(text)){ due = todayISO(); dueLabel = "Today"; text = text.replace(/\btoday\b/i, ""); }
+  const todayMatch = text.match(/\b(today|tod|eod|end of day)\b/i);
+  const tonightMatch = !todayMatch && text.match(/\btonight\b/i);
+  if(todayMatch){ due = todayISO(); dueLabel = "Today"; text = text.replace(todayMatch[0], ""); }
+  else if(tonightMatch){ due = todayISO(); dueLabel = "Tonight"; text = text.replace(tonightMatch[0], ""); }
   else if(/\b(tomorrow|tmrw|tmr)\b/i.test(text)){ due = addDays(todayISO(),1); dueLabel = "Tomorrow"; text = text.replace(/\b(tomorrow|tmrw|tmr)\b/i, ""); }
   else if(/\bnext week\b/i.test(text)){ due = addDays(todayISO(),7); dueLabel = "Next week"; text = text.replace(/\bnext week\b/i, ""); }
   else {
     const explicitDate = qaFindExplicitDate(text);
     const eowMatch = text.match(/\b(eow|end of week)\b/i);
-    const weekendMatch = text.match(/\bthis weekend\b/i);
-    const inDays = text.match(/\bin (\d+)\s*d(ays?)?\b/i);
+    const eomMatch = text.match(/\b(eom|end of month)\b/i);
+    const nextWeekendMatch = text.match(/\bnext weekend\b/i);
+    const weekendMatch = !nextWeekendMatch && text.match(/\b(this weekend|weekend)\b/i);
+    const inWeeks = text.match(/\bin (\d+)\s*w(eeks?)?\b/i);
+    const inDays = !inWeeks && text.match(/\bin (\d+)\s*d(ays?)?\b/i);
     if(explicitDate){ due = explicitDate.due; dueLabel = explicitDate.label; text = text.replace(explicitDate.match, ""); }
     else if(eowMatch){ due = qaNextWeekday(5); dueLabel = "Fri"; text = text.replace(eowMatch[0], ""); }
+    else if(eomMatch){ const d = qaEndOfMonth(); due = isoDate(d); dueLabel = d.toLocaleDateString(undefined,{day:"numeric",month:"short"}); text = text.replace(eomMatch[0], ""); }
+    else if(nextWeekendMatch){ due = addDays(qaNextWeekday(6), 7); dueLabel = "Next Sat"; text = text.replace(nextWeekendMatch[0], ""); }
     else if(weekendMatch){ due = qaNextWeekday(6); dueLabel = "Sat"; text = text.replace(weekendMatch[0], ""); }
+    else if(inWeeks){ const n = Number(inWeeks[1]); due = addDays(todayISO(), n*7); dueLabel = `In ${n}w`; text = text.replace(inWeeks[0], ""); }
     else if(inDays){ const n = Number(inDays[1]); due = addDays(todayISO(), n); dueLabel = `In ${n}d`; text = text.replace(inDays[0], ""); }
     else{
       const wd = qaFindWeekday(text);
