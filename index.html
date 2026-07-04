@@ -704,6 +704,8 @@ let syncSession = null;
 let syncStatus = "idle"; // idle | checking | synced | error
 let pushDebounceTimer = null;
 let syncInFlight = false;
+let syncErrorToasted = false; // avoid re-toasting the same background error every 45s
+let lastSyncSuccessAt = null; // epoch ms of the last sync that completed with no error
 let sliceRevs = {};
 try{ sliceRevs = JSON.parse(localStorage.getItem(SYNC_REVS_KEY)||"{}"); }catch(e){ sliceRevs = {}; }
 let lastPushedSnapshot = {};
@@ -877,6 +879,11 @@ async function initSync(){
   });
   document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") syncNow(); });
   window.addEventListener("focus", ()=> syncNow());
+  // Installed/home-screen PWAs (especially iOS) often resume from the background
+  // without firing focus/visibilitychange or even re-running this script — so
+  // reopening the app icon can silently skip every trigger above. A plain
+  // interval doesn't depend on any of that firing correctly.
+  setInterval(()=>{ if(document.visibilityState==="visible") syncNow(); }, 45000);
 
   const params = new URLSearchParams(window.location.search);
   const code = params.get("code");
@@ -906,13 +913,21 @@ async function initSync(){
     toast("Sign-in failed: "+(e && e.message ? e.message : "unknown error"));
   }
 }
-async function syncNow(){
-  if(!sb || !syncSession || syncInFlight) return;
+async function syncNow(manual){
+  if(!sb || !syncSession){ if(manual) toast("Not signed in"); return; }
+  if(syncInFlight){ if(manual) toast("Already syncing…"); return; }
   syncInFlight = true;
   syncStatus = "checking";
   if(document.getElementById("syncPanel")) renderSyncPanel();
   const { data: rows, error } = await sb.from("user_slices").select("slice,data,rev").eq("user_id", syncSession.user.id);
-  if(error){ syncStatus="error"; syncInFlight=false; if(document.getElementById("syncPanel")) renderSyncPanel(); return; }
+  if(error){
+    syncStatus="error"; syncInFlight=false;
+    // Don't spam a toast every 45s while an error persists in the background —
+    // only surface it once per new failure, or always when manually triggered.
+    if(manual || !syncErrorToasted){ toast("Sync error: "+error.message); syncErrorToasted = true; }
+    if(document.getElementById("syncPanel")) renderSyncPanel();
+    return;
+  }
   const remoteBySlice = {};
   (rows||[]).forEach(r=> remoteBySlice[r.slice] = r);
   const localPayloads = buildLocalPayloads(); // stamps state in place with fresh "u"s + graves
@@ -948,43 +963,57 @@ async function syncNow(){
     switchTab(state.settings.lastTab || "overview");
   }
   syncInFlight = false;
-  await pushDirtySlices(localPayloads);
-  syncStatus = "synced";
+  const pushOk = await pushDirtySlices(localPayloads);
+  if(pushOk){
+    syncStatus = "synced";
+    lastSyncSuccessAt = Date.now();
+    syncErrorToasted = false;
+    if(manual) toast("Synced");
+  } else {
+    syncStatus = "error";
+    if(manual || !syncErrorToasted){ toast("Sync error — will retry"); syncErrorToasted = true; }
+  }
   if(document.getElementById("syncPanel")) renderSyncPanel();
 }
 async function pushDirtySlices(localPayloads){
-  if(!sb || !syncSession) return;
+  if(!sb || !syncSession) return false;
   const payloads = localPayloads || buildLocalPayloads();
   const dirty = SYNC_ALL_SLICES.filter(slice=> JSON.stringify(payloads[slice]) !== JSON.stringify(lastPushedSnapshot[slice]||null));
-  for(const slice of dirty) await pushSlice(slice, payloads[slice], 0);
+  let ok = true;
+  for(const slice of dirty){
+    const success = await pushSlice(slice, payloads[slice], 0);
+    if(!success) ok = false;
+  }
   if(document.getElementById("syncPanel")) renderSyncPanel();
+  return ok;
 }
 async function pushSlice(slice, payload, attempt){
-  if(!sb || !syncSession || attempt>3) return;
+  if(!sb || !syncSession) return false;
+  if(attempt>3) return false; // repeatedly raced with another device — give up for now, next sync will retry
   const expectedRev = sliceRevs[slice] || 0;
   const nowIso = new Date().toISOString();
   if(expectedRev===0){
     // No row for this slice yet as far as we know — try to create it. If one
     // already exists (another device created it first), fall through below.
     const { error: insErr } = await sb.from("user_slices").insert({ user_id:syncSession.user.id, slice, data:payload, rev:1, updated_at:nowIso });
-    if(!insErr){ sliceRevs[slice]=1; lastPushedSnapshot[slice]=payload; saveSliceRevs(); saveSnapshot(); return; }
+    if(!insErr){ sliceRevs[slice]=1; lastPushedSnapshot[slice]=payload; saveSliceRevs(); saveSnapshot(); return true; }
   } else {
     const { data, error } = await sb.from("user_slices")
       .update({ data: payload, rev: expectedRev+1, updated_at: nowIso })
       .eq("user_id", syncSession.user.id).eq("slice", slice).eq("rev", expectedRev)
       .select("rev");
-    if(!error && data && data.length){ sliceRevs[slice]=expectedRev+1; lastPushedSnapshot[slice]=payload; saveSliceRevs(); saveSnapshot(); return; }
+    if(!error && data && data.length){ sliceRevs[slice]=expectedRev+1; lastPushedSnapshot[slice]=payload; saveSliceRevs(); saveSnapshot(); return true; }
   }
   // Compare-and-swap missed — another device wrote this slice since we last saw
   // it (or it already existed). Pull the current copy, merge it in like a
   // normal sync, and retry with the merged result.
   const { data: existing, error: selErr } = await sb.from("user_slices").select("data,rev").eq("user_id",syncSession.user.id).eq("slice",slice).maybeSingle();
-  if(selErr || !existing) return;
+  if(selErr || !existing) return false; // a genuine error (bad table/permissions/network), not just a race
   const merged = SYNC_COLLECTION_SLICES.includes(slice) ? mergeSlicePayload(slice, existing.data, payload) : payload;
   applySlicePayload(slice, merged);
   localStorage.setItem(KEY, JSON.stringify(state));
   sliceRevs[slice] = existing.rev; saveSliceRevs();
-  await pushSlice(slice, merged, attempt+1);
+  return await pushSlice(slice, merged, attempt+1);
 }
 function schedulePush(){
   if(!sb || !syncSession) return;
@@ -1073,11 +1102,29 @@ function renderSyncPanel(){
     return;
   }
   const statusText = syncStatus==="checking" ? "Checking…" : syncStatus==="error" ? "Sync error — will retry" : "Synced";
+  const lastSyncedText = lastSyncSuccessAt ? "Last synced "+timeAgoShort(Date.now()-lastSyncSuccessAt)+" ago" : "Not synced yet this session";
   el.innerHTML = `
     <div style="font-size:13px; margin-bottom:4px; overflow-wrap:anywhere;">Signed in as <b>${escapeHtml(syncSession.user.email)}</b></div>
-    <div class="badge ${syncStatus==='error'?'badge-danger':'badge-success'}" style="margin-bottom:14px;">${statusText}</div><br>
-    <button class="btn" id="syncSignOut">Sign out</button>`;
+    <div class="badge ${syncStatus==='error'?'badge-danger':'badge-success'}" style="margin-bottom:6px;">${statusText}</div>
+    <div style="font-size:11.5px; color:var(--text-faint); margin-bottom:14px;">${lastSyncedText}</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn btn-primary" id="syncNowBtn">Sync now</button>
+      <button class="btn" id="syncSignOut">Sign out</button>
+    </div>`;
+  el.querySelector("#syncNowBtn").addEventListener("click", async ()=>{
+    const btn = el.querySelector("#syncNowBtn"); btn.textContent="Syncing…"; btn.disabled=true;
+    await syncNow(true);
+    btn.textContent="Sync now"; btn.disabled=false;
+  });
   el.querySelector("#syncSignOut").addEventListener("click", async ()=>{ await sb.auth.signOut(); });
+}
+function timeAgoShort(ms){
+  const s = Math.round(ms/1000);
+  if(s<60) return s+"s";
+  const m = Math.round(s/60);
+  if(m<60) return m+"m";
+  const h = Math.round(m/60);
+  return h+"h";
 }
 
 /* ===================== helpers ===================== */
