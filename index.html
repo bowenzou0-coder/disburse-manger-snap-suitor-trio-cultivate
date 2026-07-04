@@ -676,9 +676,27 @@ function loadState(){
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); schedulePush(); }
 
-/* ===================== sync (Supabase, optional) ===================== */
+/* ===================== sync (Supabase, optional) =====================
+   Anki-inspired: each top-level piece of state ("slice") syncs independently
+   with its own revision counter, instead of the whole app state being one
+   conflict unit. Collections (subjects/timetable/marks/sessions/tasks) merge
+   item-by-item — like Anki unions notes/cards by id using a modified-time
+   ("mod"/usn"), with a tombstone ("graves") list so deletions still propagate
+   without a device that hasn't seen the deletion resurrecting it. Singletons
+   (settings/notes/goals/benchmarks) are small blobs synced whole, same as
+   Anki syncs its collection config as one blob rather than per field.
+   This is what makes two devices editing different (or even the same) things
+   between syncs no longer silently erase each other — the old design treated
+   the entire state blob as one conflict unit, so ANY edit anywhere could get
+   discarded by an unrelated edit elsewhere "winning" as a whole. ===================== */
 const SYNC_CFG_KEY = "keystone.syncCfg";
-const SYNC_WATERMARK_KEY = "keystone.lastSyncedAt";
+const SYNC_REVS_KEY = "keystone.sliceRevs";       // {slice: last-seen server rev}
+const SYNC_SNAPSHOT_KEY = "keystone.lastPushed";  // {slice: payload} — last payload confirmed on the server
+const SYNC_COLLECTION_SLICES = ["subjects","timetable","marks","sessions","tasks"];
+const SYNC_SINGLETON_SLICES = ["notes","goals","benchmarks","settings"];
+const SYNC_ALL_SLICES = SYNC_COLLECTION_SLICES.concat(SYNC_SINGLETON_SLICES);
+const GRAVE_TTL_MS = 180*24*60*60*1000; // keep tombstones 180 days — long enough an offline device won't resurrect a delete
+
 let syncCfg = null;
 try{ syncCfg = JSON.parse(localStorage.getItem(SYNC_CFG_KEY)||"null"); }catch(e){ syncCfg = null; }
 let sb = null;
@@ -686,18 +704,153 @@ let syncSession = null;
 let syncStatus = "idle"; // idle | checking | synced | error
 let pushDebounceTimer = null;
 let syncInFlight = false;
-// The timestamp of the last cloud state we know this device has (pulled or pushed).
-// Sync is plain last-write-wins compared against this — no user prompt on every
-// open. This is safe for one person's own data across their own devices, where
-// only one device is ever actually being typed into at a time.
-let lastSyncedAt = localStorage.getItem(SYNC_WATERMARK_KEY) || null;
-function setSyncWatermark(iso){ lastSyncedAt = iso; localStorage.setItem(SYNC_WATERMARK_KEY, iso); }
+let sliceRevs = {};
+try{ sliceRevs = JSON.parse(localStorage.getItem(SYNC_REVS_KEY)||"{}"); }catch(e){ sliceRevs = {}; }
+let lastPushedSnapshot = {};
+try{ lastPushedSnapshot = JSON.parse(localStorage.getItem(SYNC_SNAPSHOT_KEY)||"{}"); }catch(e){ lastPushedSnapshot = {}; }
+function saveSliceRevs(){ localStorage.setItem(SYNC_REVS_KEY, JSON.stringify(sliceRevs)); }
+function saveSnapshot(){ localStorage.setItem(SYNC_SNAPSHOT_KEY, JSON.stringify(lastPushedSnapshot)); }
 
-function hasMeaningfulData(){
-  return state.tasks.some(c=>c.tasks.length || c.groups.some(g=>g.tasks.length))
-    || state.marks.length>0 || state.sessions.length>0 || state.timetable.length>0
-    || (state.notes && state.notes.trim().length>0);
+/* ---- stamping: give each item a per-item "u" (last-modified, ms) the moment we
+   notice it changed, by diffing against the last payload we know the server has.
+   This runs only at sync time, so none of the ~50 places elsewhere in the app
+   that mutate state need to know sync exists or tag anything. ---- */
+function scalarSignature(obj, excludeKeys){
+  const keys = Object.keys(obj).filter(k=>!excludeKeys.includes(k)).sort();
+  return JSON.stringify(keys.map(k=>obj[k]));
 }
+function stampFlatCollection(current, snapshotItems, graves, excludeKeys){
+  excludeKeys = excludeKeys || ["u"];
+  const now = Date.now();
+  const snapById = new Map((snapshotItems||[]).map(it=>[it.id,it]));
+  const curIds = new Set();
+  (current||[]).forEach(it=>{
+    curIds.add(it.id);
+    const old = snapById.get(it.id);
+    if(!old){ if(!it.u) it.u = now; }
+    else if(scalarSignature(it, excludeKeys) !== scalarSignature(old, excludeKeys)){ it.u = now; }
+  });
+  snapById.forEach((_, id)=>{ if(!curIds.has(id)) graves.push({id, t:now}); });
+}
+function stampTasksSlice(currentCats, snapshotCats, graves){
+  const snapCatsById = new Map((snapshotCats||[]).map(c=>[c.id,c]));
+  stampFlatCollection(currentCats, snapshotCats, graves, ["u","tasks","groups"]);
+  currentCats.forEach(cat=>{
+    const snapCat = snapCatsById.get(cat.id);
+    stampFlatCollection(cat.tasks, snapCat?snapCat.tasks:[], graves, ["u"]);
+    const snapGroupsById = new Map(((snapCat&&snapCat.groups)||[]).map(g=>[g.id,g]));
+    stampFlatCollection(cat.groups, snapCat?snapCat.groups:[], graves, ["u","tasks"]);
+    cat.groups.forEach(g=>{
+      const snapGroup = snapGroupsById.get(g.id);
+      stampFlatCollection(g.tasks, snapGroup?snapGroup.tasks:[], graves, ["u"]);
+    });
+  });
+}
+function pruneGraves(graves){
+  const cutoff = Date.now() - GRAVE_TTL_MS;
+  return graves.filter(g=> g.t > cutoff);
+}
+// This device's current payload for every slice, with fresh "u" stamps and
+// graves for anything that vanished since the last confirmed-synced snapshot.
+function buildLocalPayloads(){
+  const payloads = {};
+  SYNC_COLLECTION_SLICES.forEach(slice=>{
+    const prevPayload = lastPushedSnapshot[slice] || {items:[], graves:[]};
+    const newGraves = [];
+    if(slice==="tasks") stampTasksSlice(state.tasks, prevPayload.items, newGraves);
+    else stampFlatCollection(state[slice], prevPayload.items, newGraves);
+    payloads[slice] = { items: state[slice], graves: pruneGraves((prevPayload.graves||[]).concat(newGraves)) };
+  });
+  const settingsForSync = Object.assign({}, state.settings); delete settingsForSync.lastTab; // which tab is open is local-only
+  payloads.settings = { value: settingsForSync };
+  payloads.notes = { value: state.notes };
+  payloads.goals = { value: state.goals };
+  payloads.benchmarks = { value: state.benchmarks };
+  return payloads;
+}
+
+/* ---- merge: union collections by id (newer "u" wins, ties favor local),
+   filtered against a shared grave list. Singletons are whole-value
+   last-write-wins. This is the piece that replaces the old "erase everything
+   to match whichever side looked newer" behavior. ---- */
+function mergeGraveLists(a, b){
+  const graves = new Map();
+  (a||[]).concat(b||[]).forEach(g=>{
+    const p = graves.get(g.id);
+    if(!p || g.t > p.t) graves.set(g.id, g);
+  });
+  return graves;
+}
+function mergeFlatCollection(remotePayload, localPayload){
+  const graves = mergeGraveLists(remotePayload.graves, localPayload.graves);
+  const byId = new Map();
+  (remotePayload.items||[]).concat(localPayload.items||[]).forEach(it=>{
+    const p = byId.get(it.id);
+    if(!p || (it.u||0) >= (p.u||0)) byId.set(it.id, it);
+  });
+  const items = [...byId.values()].filter(it=>{ const g = graves.get(it.id); return !g || (it.u||0) > g.t; });
+  return { items, graves: pruneGraves([...graves.values()]) };
+}
+function pickNewer(remoteObj, localObj){
+  if(!remoteObj) return localObj;
+  if(!localObj) return remoteObj;
+  return (localObj.u||0) >= (remoteObj.u||0) ? localObj : remoteObj;
+}
+function mergeTasksSlice(remotePayload, localPayload){
+  const graves = mergeGraveLists(remotePayload.graves, localPayload.graves);
+  const alive = it => { const g = graves.get(it.id); return !g || (it.u||0) > g.t; };
+  function mergeTaskArr(remoteArr, localArr){
+    const byId = new Map();
+    (remoteArr||[]).concat(localArr||[]).forEach(t=>{
+      const p = byId.get(t.id);
+      if(!p || (t.u||0) >= (p.u||0)) byId.set(t.id, t);
+    });
+    const arr = [...byId.values()].filter(alive);
+    // Defensive orphan sweep: if a parent was deleted on one device while a new
+    // subtask was added to it on another, don't destroy the subtask — just
+    // promote it to a top-level task instead.
+    const ids = new Set(arr.map(t=>t.id));
+    arr.forEach(t=>{ if(t.parentId && !ids.has(t.parentId)) t.parentId = null; });
+    return arr;
+  }
+  function mergeGroupArr(remoteGroups, localGroups){
+    const ids = new Set((remoteGroups||[]).concat(localGroups||[]).map(g=>g.id));
+    const remoteById = new Map((remoteGroups||[]).map(g=>[g.id,g]));
+    const localById = new Map((localGroups||[]).map(g=>[g.id,g]));
+    const out = [];
+    ids.forEach(id=>{
+      const r = remoteById.get(id), l = localById.get(id);
+      const winner = pickNewer(r, l);
+      if(!alive(winner)) return;
+      out.push(Object.assign({}, winner, { tasks: mergeTaskArr(r?r.tasks:[], l?l.tasks:[]) }));
+    });
+    return out;
+  }
+  const catIds = new Set((remotePayload.items||[]).concat(localPayload.items||[]).map(c=>c.id));
+  const remoteById = new Map((remotePayload.items||[]).map(c=>[c.id,c]));
+  const localById = new Map((localPayload.items||[]).map(c=>[c.id,c]));
+  const cats = [];
+  catIds.forEach(id=>{
+    const r = remoteById.get(id), l = localById.get(id);
+    const winner = pickNewer(r, l);
+    if(!alive(winner)) return;
+    cats.push(Object.assign({}, winner, {
+      tasks: mergeTaskArr(r?r.tasks:[], l?l.tasks:[]),
+      groups: mergeGroupArr(r?r.groups:[], l?l.groups:[])
+    }));
+  });
+  return { items: cats, graves: pruneGraves([...graves.values()]) };
+}
+function mergeSlicePayload(slice, remotePayload, localPayload){
+  if(slice==="tasks") return mergeTasksSlice(remotePayload, localPayload);
+  return mergeFlatCollection(remotePayload, localPayload);
+}
+function applySlicePayload(slice, payload){
+  if(SYNC_COLLECTION_SLICES.includes(slice)) state[slice] = payload.items;
+  else if(slice==="settings") state.settings = Object.assign({}, payload.value, { lastTab: state.settings.lastTab });
+  else state[slice] = payload.value;
+}
+
 async function initSync(){
   if(!syncCfg || !syncCfg.url || !syncCfg.anonKey) return;
   if(typeof window.supabase==="undefined"){ syncStatus="error"; return; }
@@ -717,7 +870,8 @@ async function initSync(){
       syncNow();
     } else if(event==="SIGNED_OUT"){
       syncSession=null; syncStatus="idle";
-      lastSyncedAt=null; localStorage.removeItem(SYNC_WATERMARK_KEY);
+      sliceRevs={}; lastPushedSnapshot={};
+      localStorage.removeItem(SYNC_REVS_KEY); localStorage.removeItem(SYNC_SNAPSHOT_KEY);
       if(document.getElementById("syncPanel")) renderSyncPanel();
     }
   });
@@ -754,72 +908,88 @@ async function initSync(){
 }
 async function syncNow(){
   if(!sb || !syncSession || syncInFlight) return;
-  if(pushDebounceTimer) return; // a local edit is queued to push — let that go first, don't clobber it with a pull
   syncInFlight = true;
   syncStatus = "checking";
   if(document.getElementById("syncPanel")) renderSyncPanel();
-  const { data, error } = await sb.from("user_state").select("data,updated_at").eq("user_id", syncSession.user.id).maybeSingle();
+  const { data: rows, error } = await sb.from("user_slices").select("slice,data,rev").eq("user_id", syncSession.user.id);
   if(error){ syncStatus="error"; syncInFlight=false; if(document.getElementById("syncPanel")) renderSyncPanel(); return; }
-  if(data){
-    if(!lastSyncedAt && hasMeaningfulData()){
-      // The one genuinely ambiguous case: this device has never synced before
-      // AND already has real data of its own. Ask once — every sync after
-      // this is silent last-write-wins using the watermark.
-      syncInFlight = false;
-      openSyncConflictModal(data);
-      return;
+  const remoteBySlice = {};
+  (rows||[]).forEach(r=> remoteBySlice[r.slice] = r);
+  const localPayloads = buildLocalPayloads(); // stamps state in place with fresh "u"s + graves
+
+  let changed = false;
+  SYNC_ALL_SLICES.forEach(slice=>{
+    const remote = remoteBySlice[slice];
+    if(!remote) return; // nothing pushed for this slice yet — the push phase below will create it
+    if(sliceRevs[slice] === remote.rev) return; // already caught up with this slice
+    let merged;
+    if(SYNC_COLLECTION_SLICES.includes(slice)){
+      merged = mergeSlicePayload(slice, remote.data, localPayloads[slice]);
+    } else {
+      // Singleton: whole-value last-write-wins. A pending local edit (this
+      // payload differs from what we last confirmed synced) always wins over
+      // a remote copy that hasn't seen it yet.
+      const localIsDirty = JSON.stringify(localPayloads[slice]) !== JSON.stringify(lastPushedSnapshot[slice]||{});
+      merged = localIsDirty ? localPayloads[slice] : remote.data;
     }
-    if(!lastSyncedAt || new Date(data.updated_at) > new Date(lastSyncedAt)){
-      applyRemoteState(data.data, data.updated_at);
-    }
-  } else {
-    await pushStateToCloud();
+    applySlicePayload(slice, merged);
+    localPayloads[slice] = merged;
+    sliceRevs[slice] = remote.rev;
+    // If the merge didn't add anything the server doesn't already have, adopt
+    // it as our confirmed-synced snapshot directly so we don't immediately
+    // push the exact same data straight back.
+    if(JSON.stringify(merged) === JSON.stringify(remote.data)) lastPushedSnapshot[slice] = merged;
+    changed = true;
+  });
+  if(changed){
+    localStorage.setItem(KEY, JSON.stringify(state));
+    saveSliceRevs(); saveSnapshot();
+    applyTheme(); renderNav(); renderStreakChip();
+    switchTab(state.settings.lastTab || "overview");
   }
-  syncStatus = "synced";
   syncInFlight = false;
+  await pushDirtySlices(localPayloads);
+  syncStatus = "synced";
   if(document.getElementById("syncPanel")) renderSyncPanel();
 }
-function applyRemoteState(remoteData, updatedAt){
-  const d = defaultState();
-  state = Object.assign({}, d, remoteData, { settings: Object.assign({}, d.settings, remoteData.settings||{}) });
-  localStorage.setItem(KEY, JSON.stringify(state));
-  setSyncWatermark(updatedAt || new Date().toISOString());
-  toast("Pulled your synced data");
-  // Refresh in place rather than reloading the page — a real page reload here
-  // was the root of a reload loop, since restoring the page re-triggers the
-  // exact same "just signed in" state on some browsers/PWA setups.
-  applyTheme();
-  renderNav();
-  renderStreakChip();
-  switchTab(state.settings.lastTab || "overview");
-  if(document.getElementById("syncPanel")) renderSyncPanel();
-}
-async function pushStateToCloud(){
+async function pushDirtySlices(localPayloads){
   if(!sb || !syncSession) return;
-  const nowIso = new Date().toISOString();
-  const { error } = await sb.from("user_state").upsert({ user_id: syncSession.user.id, data: state, updated_at: nowIso });
-  if(error){ syncStatus="error"; } else { syncStatus="synced"; setSyncWatermark(nowIso); }
+  const payloads = localPayloads || buildLocalPayloads();
+  const dirty = SYNC_ALL_SLICES.filter(slice=> JSON.stringify(payloads[slice]) !== JSON.stringify(lastPushedSnapshot[slice]||null));
+  for(const slice of dirty) await pushSlice(slice, payloads[slice], 0);
   if(document.getElementById("syncPanel")) renderSyncPanel();
+}
+async function pushSlice(slice, payload, attempt){
+  if(!sb || !syncSession || attempt>3) return;
+  const expectedRev = sliceRevs[slice] || 0;
+  const nowIso = new Date().toISOString();
+  if(expectedRev===0){
+    // No row for this slice yet as far as we know — try to create it. If one
+    // already exists (another device created it first), fall through below.
+    const { error: insErr } = await sb.from("user_slices").insert({ user_id:syncSession.user.id, slice, data:payload, rev:1, updated_at:nowIso });
+    if(!insErr){ sliceRevs[slice]=1; lastPushedSnapshot[slice]=payload; saveSliceRevs(); saveSnapshot(); return; }
+  } else {
+    const { data, error } = await sb.from("user_slices")
+      .update({ data: payload, rev: expectedRev+1, updated_at: nowIso })
+      .eq("user_id", syncSession.user.id).eq("slice", slice).eq("rev", expectedRev)
+      .select("rev");
+    if(!error && data && data.length){ sliceRevs[slice]=expectedRev+1; lastPushedSnapshot[slice]=payload; saveSliceRevs(); saveSnapshot(); return; }
+  }
+  // Compare-and-swap missed — another device wrote this slice since we last saw
+  // it (or it already existed). Pull the current copy, merge it in like a
+  // normal sync, and retry with the merged result.
+  const { data: existing, error: selErr } = await sb.from("user_slices").select("data,rev").eq("user_id",syncSession.user.id).eq("slice",slice).maybeSingle();
+  if(selErr || !existing) return;
+  const merged = SYNC_COLLECTION_SLICES.includes(slice) ? mergeSlicePayload(slice, existing.data, payload) : payload;
+  applySlicePayload(slice, merged);
+  localStorage.setItem(KEY, JSON.stringify(state));
+  sliceRevs[slice] = existing.rev; saveSliceRevs();
+  await pushSlice(slice, merged, attempt+1);
 }
 function schedulePush(){
   if(!sb || !syncSession) return;
   clearTimeout(pushDebounceTimer);
-  pushDebounceTimer = setTimeout(()=>{ pushDebounceTimer = null; pushStateToCloud(); }, 2000);
-}
-function openSyncConflictModal(remoteRow){
-  const remoteDate = new Date(remoteRow.updated_at).toLocaleString();
-  const body = `
-    <p style="font-size:13px; color:var(--text-dim); margin-bottom:16px;">This device already has data on it, and there's separately synced data from <b>${escapeHtml(remoteDate)}</b>. Which one should this device use? (This choice only happens once — after this, syncing is automatic.)</p>
-    <div style="display:flex; flex-direction:column; gap:8px;">
-      <button class="btn btn-primary" id="syncUseCloud">Use synced data</button>
-      <button class="btn" id="syncKeepLocal">Keep this device's data</button>
-      <button class="btn btn-danger" id="syncCancelBtn">Don't sync</button>
-    </div>`;
-  openModal("Sync conflict", body, root=>{
-    root.querySelector("#syncUseCloud").addEventListener("click", ()=>{ closeModal(); applyRemoteState(remoteRow.data, remoteRow.updated_at); });
-    root.querySelector("#syncKeepLocal").addEventListener("click", async ()=>{ closeModal(); await pushStateToCloud(); toast("This device's data is now the synced copy."); });
-    root.querySelector("#syncCancelBtn").addEventListener("click", async ()=>{ closeModal(); if(sb) await sb.auth.signOut(); });
-  });
+  pushDebounceTimer = setTimeout(()=>{ pushDebounceTimer = null; pushDirtySlices(); }, 2000);
 }
 function renderSyncPanel(){
   const el = document.getElementById("syncPanel");
