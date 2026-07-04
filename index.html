@@ -984,7 +984,15 @@ async function syncNow(manual){
       localStorage.setItem(KEY, JSON.stringify(state));
       saveSliceRevs(); saveSnapshot();
       applyTheme(); renderNav(); renderStreakChip();
-      switchTab(state.settings.lastTab || "overview");
+      // switchTab rebuilds the whole tab's DOM from scratch — if the user is
+      // mid-keystroke in an input (e.g. the checklist quick-add box) when a
+      // background sync completes, that wipes out what they were typing. The
+      // merged data is already safely in `state` and localStorage above; just
+      // defer the visual refresh until they're not actively typing — their
+      // own next action (finishing the entry, switching tabs, etc.) will
+      // naturally re-render with the fresh data anyway.
+      const typing = document.activeElement && ["INPUT","TEXTAREA"].includes(document.activeElement.tagName);
+      if(!typing) switchTab(state.settings.lastTab || "overview");
     }
     syncInFlight = false;
     const pushOk = await pushDirtySlices(localPayloads);
