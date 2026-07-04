@@ -664,6 +664,22 @@ function defaultState(){
     settings: { pomodoroWork:25, pomodoroShort:5, pomodoroLong:15, longBreakInterval:4, theme:"light", lastTab:"overview" }
   };
 }
+// Fills in any fields missing from a category/group/task — needed for state
+// loaded from an older backup, a hand-edited export, or a sync payload that
+// predates a field being added. Without this, a category missing "groups" (or
+// a task missing "parentId"/"repeatDays"/etc.) throws deep inside rendering
+// or the sync stamping/merge code the next time it runs.
+function normalizeTasksSlice(cats){
+  return (cats||[]).map(cat=>({
+    id: cat.id, name: cat.name||"Untitled", color: cat.color||"#888888",
+    description: cat.description||"",
+    tasks: (cat.tasks||[]).map(t=>makeTask(t)),
+    groups: (cat.groups||[]).map(g=>({
+      id: g.id, name: g.name||"Untitled",
+      tasks: (g.tasks||[]).map(t=>makeTask(t))
+    }))
+  }));
+}
 let state = loadState();
 function loadState(){
   try{
@@ -671,7 +687,9 @@ function loadState(){
     if(!raw) return defaultState();
     const parsed = JSON.parse(raw);
     const d = defaultState();
-    return Object.assign({}, d, parsed, { settings: Object.assign({}, d.settings, parsed.settings||{}) });
+    const merged = Object.assign({}, d, parsed, { settings: Object.assign({}, d.settings, parsed.settings||{}) });
+    merged.tasks = normalizeTasksSlice(merged.tasks);
+    return merged;
   }catch(e){ return defaultState(); }
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); schedulePush(); }
@@ -1219,12 +1237,23 @@ function qaFindWeekday(text){
   }
   return null;
 }
+// JS silently rolls invalid dates into the next month (new Date(2026,1,30)
+// becomes Mar 2, and new Date(2026,1,29) in a non-leap year becomes Mar 1)
+// instead of erroring — so a mistyped or impossible day-of-month would
+// otherwise resolve to a wrong date with no indication anything went wrong.
+// monthIndex can be outside 0-11 (e.g. 12 for "next January") — JS normalizes
+// that correctly on its own; only the day-within-month needs checking.
+function safeMonthDay(year, monthIndex, day){
+  const d = new Date(year, monthIndex, day);
+  const normalizedMonth = ((monthIndex % 12) + 12) % 12;
+  return d.getMonth()===normalizedMonth ? d : null;
+}
 function qaFindExplicitDate(text){
   const thisYear = new Date().getFullYear();
   const startOfToday = new Date(todayISO()+"T00:00:00");
   function resolveYear(mon, day){
-    let d = new Date(thisYear, mon, day);
-    if(d < startOfToday) d = new Date(thisYear+1, mon, day);
+    let d = safeMonthDay(thisYear, mon, day);
+    if(d && d < startOfToday) d = safeMonthDay(thisYear+1, mon, day);
     return d;
   }
   let m = text.match(/\b(\d{1,2})[\/\-](\d{1,2})\b/);
@@ -1232,7 +1261,7 @@ function qaFindExplicitDate(text){
     const day = +m[1], mon = +m[2]-1;
     if(day>=1 && day<=31 && mon>=0 && mon<=11){
       const d = resolveYear(mon, day);
-      return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
+      if(d) return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
     }
   }
   const monthNames = Object.keys(QA_MONTHS).join("|");
@@ -1246,7 +1275,7 @@ function qaFindExplicitDate(text){
   if(m && day>=1 && day<=31){
     const mon = QA_MONTHS[monName];
     const d = resolveYear(mon, day);
-    return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
+    if(d) return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
   }
   // Bare ordinal with no month attached ("due 27th") — this month, or next month
   // if that day has already passed, matching Todoist's convention.
@@ -1255,9 +1284,9 @@ function qaFindExplicitDate(text){
     const d2 = +m[1];
     if(d2>=1 && d2<=31){
       const now = new Date();
-      let d = new Date(now.getFullYear(), now.getMonth(), d2);
-      if(d < startOfToday) d = new Date(now.getFullYear(), now.getMonth()+1, d2);
-      return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
+      let d = safeMonthDay(now.getFullYear(), now.getMonth(), d2);
+      if(d && d < startOfToday) d = safeMonthDay(now.getFullYear(), now.getMonth()+1, d2);
+      if(d) return { due: isoDate(d), label: d.toLocaleDateString(undefined,{day:"numeric",month:"short"}), match: m[0] };
     }
   }
   return null;
@@ -1704,6 +1733,7 @@ function parseICS(text){
     const s = parseICSDate(ev.dtstart), e = parseICSDate(ev.dtend);
     if(!s || !e) return { error:"Couldn't read this event's time", raw: ev.summary||"(untitled)" };
     if(s.day===null || s.day>4) return null;
+    if(timeToMin(e.time)<=timeToMin(s.time)) return { error:"End time must be after start", raw: ev.summary||"(untitled)" };
     const teacherMatch = (ev.description||"").match(/Teacher:\s*([^\n]+)/i);
     return {
       day:s.day, subject: cleanICSSubject(ev.summary||"Untitled"), start:s.time, end:e.time,
@@ -1867,6 +1897,11 @@ function setTaskDoneToday(t, done){
     const idx = t.completedDates.indexOf(todayISO());
     if(done && idx===-1) t.completedDates.push(todayISO());
     else if(!done && idx!==-1) t.completedDates.splice(idx,1);
+    // A daily habit tracked for years would otherwise grow this array forever —
+    // 400 days covers the streak/heatmap views with room to spare, and keeps
+    // every sync payload (and the per-sync diff) from bloating indefinitely.
+    const cutoff = addDays(todayISO(), -400);
+    t.completedDates = t.completedDates.filter(d=> d >= cutoff);
   } else {
     t.done = done;
     t.completedAt = done ? todayISO() : null;
@@ -2170,7 +2205,7 @@ function renderTimetable(){
       const h = Math.max(6,(timeToMin(p.end)-timeToMin(p.start))*PX_PER_MIN - 3);
       const name = escapeHtml(subj?subj.name:(p.label||"Untitled"));
       const meta = `${minToTimeLabel(timeToMin(p.start))}–${minToTimeLabel(timeToMin(p.end))}${p.room?" · "+escapeHtml(p.room):""}`;
-      const titleAttr = `${subj?subj.name:(p.label||"Untitled")} — ${meta}`.replace(/"/g,"&quot;");
+      const titleAttr = escapeHtml(`${subj?subj.name:(p.label||"Untitled")} — ${minToTimeLabel(timeToMin(p.start))}–${minToTimeLabel(timeToMin(p.end))}${p.room?" · "+p.room:""}`);
       if(h < 15){
         inner += `<div class="tt-block tt-sliver" data-edit-period="${p.id}" title="${titleAttr}" style="top:${top}px; height:${h}px; background:${color}; border-color:${color};"></div>`;
       } else {
@@ -2433,7 +2468,6 @@ function onStartPause(){
   if(timer.running){
     timer.accumSec = elapsedSec(); timer.running=false; clearInterval(timer.intervalId); timer.intervalId=null;
   } else {
-    if("Notification" in window && Notification.permission==="default") Notification.requestPermission();
     timer.segStart = Date.now(); timer.running = true;
     timer.intervalId = setInterval(tick, 1000);
   }
@@ -2463,6 +2497,13 @@ function onStopLog(){
   renderPomoSessions(); renderOverview();
   renderTimerControls(); updateTimerDisplay();
 }
+// A running timer lives only in memory — reloading the page (or a sync pull
+// re-rendering the app) previously lost whatever was in progress with nothing
+// logged. Bank it as a session before the page actually goes away. "pagehide"
+// catches mobile backgrounding/navigation more reliably than "beforeunload".
+["pagehide","beforeunload"].forEach(evt=> window.addEventListener(evt, ()=>{
+  if(timer.running) bankElapsed(timer.timerType==="stopwatch" ? "stopwatch" : "pomodoro", true);
+}));
 ["durWork","durShort","durLong"].forEach(id=>{
   document.getElementById(id).addEventListener("change", e=>{
     const v = Math.max(1, Number(e.target.value)||1);
@@ -2847,7 +2888,7 @@ function renderMarkBars(body){
       return `<div class="mark-bar-row" data-subj-bar="${s.id}">
         <div class="mark-bar-name"><span class="dot" style="background:${s.color}"></span>${escapeHtml(s.name)}</div>
         <div class="mark-bar-track">
-          <div class="mark-bar-fill" style="width:${avg==null?0:avg}%; background:${s.color};"></div>
+          <div class="mark-bar-fill" style="width:${avg==null?0:Math.min(100,avg)}%; background:${s.color};"></div>
           ${bench!=null?`<div class="mark-bar-benchmark" style="left:calc(${bench}% - 1px);" title="Benchmark: ${bench}%"></div>`:''}
         </div>
         <div class="mark-bar-val">${avg==null?'—':avg.toFixed(1)+'%'}</div>
@@ -2992,6 +3033,7 @@ function openMarkModal(markId, anchor, presetSubjectId){
     root.querySelector("#mfSave").addEventListener("click", ()=>{
       const name = root.querySelector("#mfName").value.trim();
       if(!name){ toast("Give the assessment a name"); return; }
+      if(!state.subjects.length){ toast("Add a subject first (Settings → Subjects)"); return; }
       const scoreRaw = root.querySelector("#mfScore").value;
       const rec = {
         id: editing?editing.id:uid(),
@@ -3119,14 +3161,20 @@ function renderSettings(){
       <input class="input" value="${escapeHtml(s.name)}" data-subj-name="${s.id}">
       <button class="iconbtn" data-subj-del="${s.id}">${icon('<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>')}</button>
     </div>`).join("");
-  document.getElementById("subjList").querySelectorAll("[data-subj-color]").forEach(el=> el.addEventListener("input", e=>{
-    subjectById(el.dataset.subjColor).color = e.target.value; save(); renderTimetable(); renderSettings();
+  document.getElementById("subjList").querySelectorAll("[data-subj-color]").forEach(el=> el.addEventListener("change", e=>{
+    // "change" (fires once, on close) not "input" (fires continuously while
+    // dragging) — re-rendering settings mid-drag was tearing out the native
+    // color picker the user was actively using.
+    const subj = subjectById(el.dataset.subjColor); if(!subj) return;
+    subj.color = e.target.value; save(); renderTimetable(); renderSettings();
   }));
   document.getElementById("subjList").querySelectorAll("[data-subj-name]").forEach(el=> el.addEventListener("change", e=>{
-    subjectById(el.dataset.subjName).name = e.target.value.trim() || "Untitled"; save();
+    const subj = subjectById(el.dataset.subjName); if(!subj) return;
+    subj.name = e.target.value.trim() || "Untitled"; save();
   }));
   document.getElementById("subjList").querySelectorAll("[data-subj-del]").forEach(el=> el.addEventListener("click", ()=>{
     const id = el.dataset.subjDel; const subj = subjectById(id);
+    if(!subj) return; // already removed (e.g. by a sync from another device) — nothing to delete
     const uses = state.timetable.filter(p=>p.subjectId===id).length + state.marks.filter(m=>m.subjectId===id).length + state.sessions.filter(s=>s.subjectId===id).length;
     if(confirm(`Delete "${subj.name}"?${uses?` It's referenced in ${uses} record(s), which will show as "Unknown subject".`:''}`)){
       state.subjects = state.subjects.filter(s=>s.id!==id); delete state.goals[id]; save(); renderSettings();
@@ -3196,6 +3244,7 @@ document.getElementById("importFile").addEventListener("change", e=>{
       if(!parsed.subjects || !parsed.tasks) throw new Error("bad shape");
       if(confirm("This will replace all current data with the backup. Continue?")){
         state = Object.assign(defaultState(), parsed, {settings: Object.assign({}, defaultState().settings, parsed.settings||{})});
+        state.tasks = normalizeTasksSlice(state.tasks);
         save(); location.reload();
       }
     }catch(err){ toast("Couldn't read that file — is it a valid backup?"); }
