@@ -919,73 +919,97 @@ async function syncNow(manual){
   syncInFlight = true;
   syncStatus = "checking";
   if(document.getElementById("syncPanel")) renderSyncPanel();
-  const { data: rows, error } = await sb.from("user_slices").select("slice,data,rev").eq("user_id", syncSession.user.id);
-  if(error){
-    syncStatus="error"; syncInFlight=false;
-    // Don't spam a toast every 45s while an error persists in the background —
-    // only surface it once per new failure, or always when manually triggered.
-    if(manual || !syncErrorToasted){ toast("Sync error: "+error.message); syncErrorToasted = true; }
-    if(document.getElementById("syncPanel")) renderSyncPanel();
-    return;
-  }
-  const remoteBySlice = {};
-  (rows||[]).forEach(r=> remoteBySlice[r.slice] = r);
-  const localPayloads = buildLocalPayloads(); // stamps state in place with fresh "u"s + graves
+  // Everything below is wrapped in one try/catch/finally: an uncaught exception
+  // anywhere in here (a merge bug, an unexpected data shape, anything) used to
+  // leave syncInFlight stuck at true forever, silently disabling every future
+  // sync attempt — including the manual button — until the page was reloaded.
+  // Now any failure is caught, reported with its real message, and the lock
+  // is always released in `finally` no matter what went wrong.
+  try{
+    const { data: rows, error } = await sb.from("user_slices").select("slice,data,rev").eq("user_id", syncSession.user.id);
+    if(error) throw error;
+    const remoteBySlice = {};
+    (rows||[]).forEach(r=> remoteBySlice[r.slice] = r);
+    const localPayloads = buildLocalPayloads(); // stamps state in place with fresh "u"s + graves
 
-  let changed = false;
-  SYNC_ALL_SLICES.forEach(slice=>{
-    const remote = remoteBySlice[slice];
-    if(!remote) return; // nothing pushed for this slice yet — the push phase below will create it
-    if(sliceRevs[slice] === remote.rev) return; // already caught up with this slice
-    let merged;
-    if(SYNC_COLLECTION_SLICES.includes(slice)){
-      merged = mergeSlicePayload(slice, remote.data, localPayloads[slice]);
-    } else {
-      // Singleton: whole-value last-write-wins. A pending local edit (this
-      // payload differs from what we last confirmed synced) always wins over
-      // a remote copy that hasn't seen it yet.
-      const localIsDirty = JSON.stringify(localPayloads[slice]) !== JSON.stringify(lastPushedSnapshot[slice]||{});
-      merged = localIsDirty ? localPayloads[slice] : remote.data;
+    let changed = false;
+    SYNC_ALL_SLICES.forEach(slice=>{
+      const remote = remoteBySlice[slice];
+      if(!remote) return; // nothing pushed for this slice yet — the push phase below will create it
+      if(sliceRevs[slice] === remote.rev) return; // already caught up with this slice
+      let merged;
+      if(SYNC_COLLECTION_SLICES.includes(slice)){
+        merged = mergeSlicePayload(slice, remote.data, localPayloads[slice]);
+      } else {
+        // Singleton: whole-value last-write-wins. A pending local edit (this
+        // payload differs from what we last confirmed synced) wins over a
+        // remote copy that hasn't seen it yet. But if THIS device has never
+        // confirmed a sync for this slice at all, there's nothing to compare
+        // against — trust the remote copy rather than this device's untouched
+        // default (the bug this replaces: comparing against a shape-mismatched
+        // "{}" fallback made every never-synced-before device look "dirty" and
+        // silently overwrite real remote data with its own blank default).
+        const hasSyncedBefore = Object.prototype.hasOwnProperty.call(lastPushedSnapshot, slice);
+        const localIsDirty = hasSyncedBefore && JSON.stringify(localPayloads[slice]) !== JSON.stringify(lastPushedSnapshot[slice]);
+        merged = localIsDirty ? localPayloads[slice] : remote.data;
+      }
+      applySlicePayload(slice, merged);
+      localPayloads[slice] = merged;
+      sliceRevs[slice] = remote.rev;
+      // If the merge didn't add anything the server doesn't already have, adopt
+      // it as our confirmed-synced snapshot directly so we don't immediately
+      // push the exact same data straight back.
+      if(JSON.stringify(merged) === JSON.stringify(remote.data)) lastPushedSnapshot[slice] = merged;
+      changed = true;
+    });
+    if(changed){
+      localStorage.setItem(KEY, JSON.stringify(state));
+      saveSliceRevs(); saveSnapshot();
+      applyTheme(); renderNav(); renderStreakChip();
+      switchTab(state.settings.lastTab || "overview");
     }
-    applySlicePayload(slice, merged);
-    localPayloads[slice] = merged;
-    sliceRevs[slice] = remote.rev;
-    // If the merge didn't add anything the server doesn't already have, adopt
-    // it as our confirmed-synced snapshot directly so we don't immediately
-    // push the exact same data straight back.
-    if(JSON.stringify(merged) === JSON.stringify(remote.data)) lastPushedSnapshot[slice] = merged;
-    changed = true;
-  });
-  if(changed){
-    localStorage.setItem(KEY, JSON.stringify(state));
-    saveSliceRevs(); saveSnapshot();
-    applyTheme(); renderNav(); renderStreakChip();
-    switchTab(state.settings.lastTab || "overview");
-  }
-  syncInFlight = false;
-  const pushOk = await pushDirtySlices(localPayloads);
-  if(pushOk){
-    syncStatus = "synced";
-    lastSyncSuccessAt = Date.now();
-    syncErrorToasted = false;
-    if(manual) toast("Synced");
-  } else {
+    syncInFlight = false;
+    const pushOk = await pushDirtySlices(localPayloads);
+    if(pushOk){
+      syncStatus = "synced";
+      lastSyncSuccessAt = Date.now();
+      syncErrorToasted = false;
+      if(manual) toast("Synced");
+    } else {
+      syncStatus = "error";
+      if(manual || !syncErrorToasted){ toast("Sync error — will retry"); syncErrorToasted = true; }
+    }
+  }catch(e){
     syncStatus = "error";
-    if(manual || !syncErrorToasted){ toast("Sync error — will retry"); syncErrorToasted = true; }
+    const msg = (e && e.message) ? e.message : "unknown error";
+    if(manual || !syncErrorToasted){ toast("Sync error: "+msg); syncErrorToasted = true; }
+  }finally{
+    syncInFlight = false;
+    if(document.getElementById("syncPanel")) renderSyncPanel();
   }
-  if(document.getElementById("syncPanel")) renderSyncPanel();
 }
 async function pushDirtySlices(localPayloads){
   if(!sb || !syncSession) return false;
-  const payloads = localPayloads || buildLocalPayloads();
-  const dirty = SYNC_ALL_SLICES.filter(slice=> JSON.stringify(payloads[slice]) !== JSON.stringify(lastPushedSnapshot[slice]||null));
-  let ok = true;
-  for(const slice of dirty){
-    const success = await pushSlice(slice, payloads[slice], 0);
-    if(!success) ok = false;
+  try{
+    const payloads = localPayloads || buildLocalPayloads();
+    const dirty = SYNC_ALL_SLICES.filter(slice=> JSON.stringify(payloads[slice]) !== JSON.stringify(lastPushedSnapshot[slice]||null));
+    let ok = true;
+    for(const slice of dirty){
+      const success = await pushSlice(slice, payloads[slice], 0);
+      if(!success) ok = false;
+    }
+    if(document.getElementById("syncPanel")) renderSyncPanel();
+    return ok;
+  }catch(e){
+    // This can run standalone from the debounced auto-save path (not just
+    // from inside syncNow's try/catch), so it needs its own safety net —
+    // otherwise a thrown error here becomes an unhandled rejection with zero
+    // visible feedback, the exact failure mode that made past bugs invisible.
+    if(!syncErrorToasted){ toast("Sync error: "+((e&&e.message)||"unknown error")); syncErrorToasted = true; }
+    syncStatus = "error";
+    if(document.getElementById("syncPanel")) renderSyncPanel();
+    return false;
   }
-  if(document.getElementById("syncPanel")) renderSyncPanel();
-  return ok;
 }
 async function pushSlice(slice, payload, attempt){
   if(!sb || !syncSession) return false;
@@ -2717,7 +2741,11 @@ function openTaskEditModal(catId, groupId, taskId, anchor){
   });
 }
 function renderFilteredView(main){
+  // Repeating tasks usually have no due date at all — they're "due" whenever
+  // they're scheduled to repeat, not on a fixed calendar date — so the Today
+  // tab has to check taskScheduledOn for them instead of requiring t.due.
   const list = allTasks().filter(t=>!taskDoneToday(t)).filter(t=>{
+    if(t.repeat) return checklistState.filter==="today" && taskScheduledOn(t, todayISO());
     if(!t.due) return false;
     if(checklistState.filter==="today") return t.due<=todayISO();
     if(checklistState.filter==="upcoming") return t.due>todayISO() && daysBetween(todayISO(),t.due)<=7;
@@ -2726,12 +2754,13 @@ function renderFilteredView(main){
   if(!list.length){ main.innerHTML = `<div class="empty">Nothing here.</div>`; return; }
   main.innerHTML = list.map(t=>{
     const cat = state.tasks.find(c=>c.id===t.catId);
-    const overdue = t.due < todayISO();
+    const overdue = t.due && t.due < todayISO();
+    const dueLabel = t.due ? t.due : taskRepeatLabel(t);
     return `<div class="task-row">
       <div class="task-check" data-toggle="${t.catId}:${t.groupId||''}:${t.id}"></div>
       <span class="dot" style="background:${cat?cat.color:'#aaa'}"></span>
       <span class="task-title" style="flex:1;">${escapeHtml(t.title)} <span style="color:var(--text-faint); font-size:11.5px;">— ${escapeHtml(cat?cat.name:'')}</span></span>
-      <span class="task-due" style="background:${overdue?'var(--danger-soft)':'var(--surface-2)'}; color:${overdue?'var(--danger)':'var(--text-dim)'}">${t.due}</span>
+      <span class="task-due" style="background:${overdue?'var(--danger-soft)':'var(--surface-2)'}; color:${overdue?'var(--danger)':'var(--text-dim)'}">${escapeHtml(dueLabel)}</span>
     </div>`;
   }).join("");
   wireTaskEvents(main);
