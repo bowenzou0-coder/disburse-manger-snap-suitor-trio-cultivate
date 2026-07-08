@@ -1892,18 +1892,30 @@ function commitImport(mode){
 }
 
 /* ===================== active-days / streak ===================== */
-// Repeating tasks (daily / weekday / weekly-on-specific-days) track every
-// completion date (so history/streak stays intact across days), while
-// ordinary tasks keep the simple done/completedAt pair.
+// Repeating tasks track every completion date (so history/streak stays intact
+// across days) AND a "due" date, which is the one occurrence currently owed.
+// Missing a day does NOT quietly reset the next morning — due stays stuck on
+// the missed date (shown overdue, like any other overdue task) until you
+// actually check it off. Checking off an overdue occurrence doesn't count as
+// completing today's — it just catches due up to the next day this task is
+// actually scheduled on (which, for a daily habit, is simply today).
 function taskDoneToday(t){
-  if(t.repeat) return (t.completedDates||[]).includes(todayISO());
+  if(t.repeat) return (t.completedDates||[]).includes(t.due || todayISO());
   return !!t.done;
 }
 function setTaskDoneToday(t, done){
   if(t.repeat){
+    t.due = t.due || todayISO();
+    if(t.due < todayISO()){
+      // Overdue: resolve the backlog by advancing due, but don't record a
+      // historical completion for the day that was actually missed, and
+      // don't mark today's occurrence done — that's still a separate tick.
+      if(done) t.due = nextScheduledDate(t, todayISO());
+      return;
+    }
     t.completedDates = t.completedDates || [];
-    const idx = t.completedDates.indexOf(todayISO());
-    if(done && idx===-1) t.completedDates.push(todayISO());
+    const idx = t.completedDates.indexOf(t.due);
+    if(done && idx===-1) t.completedDates.push(t.due);
     else if(!done && idx!==-1) t.completedDates.splice(idx,1);
     // A daily habit tracked for years would otherwise grow this array forever —
     // 400 days covers the streak/heatmap views with room to spare, and keeps
@@ -1930,6 +1942,26 @@ function taskScheduledOn(t, dateISO){
   if(t.repeat==="weekly") return (t.repeatDays||[]).includes(dow);
   return true;
 }
+// The earliest date on/after fromDateISO that this task is actually scheduled
+// on. For a daily task that's always fromDateISO itself; for "every Sunday"
+// missed and resolved on a Monday, this walks forward to the next Sunday.
+function nextScheduledDate(t, fromDateISO){
+  let d = fromDateISO;
+  for(let i=0;i<8;i++){
+    if(taskScheduledOn(t, d)) return d;
+    d = addDays(d, 1);
+  }
+  return fromDateISO;
+}
+// Whether a repeat task should be visible/counted "today" — either it's
+// actually scheduled today, or it's overdue (missed on an earlier scheduled
+// day and not yet resolved) and so stays relevant regardless of today's
+// schedule until the backlog is cleared.
+function taskRelevantToday(t){
+  if(!t.repeat) return true;
+  if(taskScheduledOn(t, todayISO())) return true;
+  return !!(t.due && t.due < todayISO() && !taskDoneToday(t));
+}
 function taskRepeatLabel(t){
   if(t.repeat==="daily") return "Repeats daily";
   if(t.repeat==="weekday") return "Repeats on weekdays";
@@ -1949,6 +1981,15 @@ function getActiveDatesSet(){
   });
   return set;
 }
+function tasksCompletedCountOnDate(dateStr){
+  let count = 0;
+  const addTask = t=>{ if(taskCompletedOnDate(t, dateStr)) count++; };
+  state.tasks.forEach(cat=>{
+    cat.tasks.forEach(addTask);
+    cat.groups.forEach(g=> g.tasks.forEach(addTask));
+  });
+  return count;
+}
 function computeStreak(){
   const set = getActiveDatesSet();
   let d = todayISO();
@@ -1958,6 +1999,61 @@ function computeStreak(){
   return streak;
 }
 function minutesOnDate(dateStr){ return state.sessions.filter(s=>s.date===dateStr).reduce((a,s)=>a+s.minutes,0); }
+
+/* ===================== daily rollover: repeat-task due dates + cleanup ===================== */
+// For a repeat task that WAS completed on time, advance its due date forward
+// to the next scheduled occurrence — the normal "fresh checkbox each day"
+// case. A task that's still sitting on a past due date and wasn't completed
+// is left untouched (that's what makes it show up as overdue).
+function rolloverRepeatTasks(){
+  const today = todayISO();
+  const advance = t=>{
+    if(!t.repeat) return;
+    if(!t.due){ t.due = today; return; }
+    if(t.due < today && taskCompletedOnDate(t, t.due)){
+      t.due = nextScheduledDate(t, addDays(t.due, 1));
+    }
+  };
+  state.tasks.forEach(cat=>{
+    cat.tasks.forEach(advance);
+    cat.groups.forEach(g=> g.tasks.forEach(advance));
+  });
+}
+// Completed one-off tasks disappear the next time a new day begins, instead of
+// needing to be deleted by hand. Checking off a top-level task deletes it and
+// every one of its subtasks together, even ones not yet individually ticked —
+// completing the parent means the whole thing is considered wrapped up.
+// Recurring tasks are never touched here, at any level.
+function cleanupCompletedTasks(){
+  const cleanArr = arr=>{
+    const doneParentIds = new Set(arr.filter(t=> !t.repeat && !t.parentId && t.done).map(t=>t.id));
+    return arr.filter(t=>{
+      if(t.repeat) return true;
+      if(!t.parentId) return !t.done;
+      if(doneParentIds.has(t.parentId)) return false;
+      return !t.done;
+    });
+  };
+  state.tasks.forEach(cat=>{
+    cat.tasks = cleanArr(cat.tasks);
+    cat.groups.forEach(g=>{ g.tasks = cleanArr(g.tasks); });
+  });
+}
+const LAST_SEEN_DAY_KEY = "keystone.lastSeenDay";
+function runDailyRollover(){
+  rolloverRepeatTasks(); // always safe to run — idempotent once dates are already caught up
+  const today = todayISO();
+  const lastSeen = localStorage.getItem(LAST_SEEN_DAY_KEY);
+  if(lastSeen !== today){
+    // Only purge once an actual day boundary has passed, not on every reload
+    // within the same day (that would delete things completed minutes ago),
+    // and not on the very first-ever run (nothing meaningful to clean up yet).
+    if(lastSeen) cleanupCompletedTasks();
+    localStorage.setItem(LAST_SEEN_DAY_KEY, today);
+    return true; // a real day boundary was crossed
+  }
+  return false;
+}
 
 /* ===================== tabs ===================== */
 function renderNav(){
@@ -2135,14 +2231,25 @@ function renderHeroHeatmap(){
   for(let i=0, pad=mondayIndex(jan1); i<pad; i++) cells.push(null);
   for(let d=new Date(jan1); d<=dec31; d.setDate(d.getDate()+1)) cells.push(isoDate(d));
   const today = todayISO();
+  // Same "active day" definition the streak counter uses (study time OR
+  // checklist completions) — previously this heatmap only shaded study
+  // minutes, so a checklist-only day extended your streak but showed blank.
+  const activeSet = getActiveDatesSet();
   const maxMin = Math.max(1, ...cells.filter(Boolean).map(minutesOnDate));
   document.getElementById("heroHeatGrid").innerHTML = cells.map(d=>{
     if(!d) return `<div class="heat-cell" style="visibility:hidden;"></div>`;
     const min = minutesOnDate(d);
-    const alpha = min===0? 0 : 0.25 + 0.75*Math.min(1,min/maxMin);
-    const bg = min===0 ? "var(--surface)" : `color-mix(in srgb, var(--accent) ${Math.round(alpha*100)}%, var(--surface))`;
+    const tasksDone = tasksCompletedCountOnDate(d);
+    let alpha = 0;
+    if(min>0) alpha = 0.25 + 0.75*Math.min(1,min/maxMin);
+    else if(activeSet.has(d)) alpha = 0.35; // checklist-only day — still visibly active, just not scaled by minutes
+    const bg = alpha===0 ? "var(--surface)" : `color-mix(in srgb, var(--accent) ${Math.round(alpha*100)}%, var(--surface))`;
     const isToday = d===today;
-    return `<div class="heat-cell${isToday?' heat-today':''}" title="${d}: ${min}m${isToday?' · today':''}" style="background:${bg}"></div>`;
+    const parts = [];
+    if(min>0) parts.push(`${min}m`);
+    if(tasksDone>0) parts.push(`${tasksDone} task${tasksDone===1?'':'s'}`);
+    const summary = parts.length ? parts.join(", ") : "no activity";
+    return `<div class="heat-cell${isToday?' heat-today':''}" title="${d}: ${summary}${isToday?' · today':''}" style="background:${bg}"></div>`;
   }).join("");
 }
 function renderSubjectBalance(){
@@ -2556,7 +2663,7 @@ function renderChecklist(){
 
   const sidebar = document.getElementById("catSidebar");
   ensureActiveCat();
-  const scheduledToday = t=> taskScheduledOn(t, todayISO());
+  const scheduledToday = taskRelevantToday;
   const catListHtml = state.tasks.map(c=>{
     const remaining = c.tasks.filter(scheduledToday).filter(t=>!taskDoneToday(t)).length
       + c.groups.reduce((a,g)=>a+g.tasks.filter(scheduledToday).filter(t=>!taskDoneToday(t)).length,0);
@@ -2630,7 +2737,10 @@ function renderTaskRow(t, catId, groupId, opts){
   const priColors = {0:"transparent",1:"#dc2626",2:"#d97706",3:"#3b82f6"};
   const done = taskDoneToday(t);
   const overdue = t.due && !done && t.due<todayISO();
-  const notToday = t.repeat && !taskScheduledOn(t, todayISO());
+  // Overdue always takes visual priority over "not scheduled today" dimming —
+  // a missed weekly task should stay clearly flagged every day until resolved,
+  // not fade into the background just because today isn't its normal day.
+  const notToday = t.repeat && !overdue && !taskRelevantToday(t);
   const hasKids = opts.childCount>0;
   return `<div class="task-row ${opts.indent?'subtask-row':''}" ${notToday?'style="opacity:.5;"':''}>
       ${hasKids?`<button class="iconbtn" data-toggle-collapse="${catId}:${groupId||''}:${t.id}" style="flex-shrink:0; padding:2px;">${icon(t.collapsed?'<path d="M9 18l6-6-6-6"/>':'<path d="M6 9l6 6 6-6"/>',12)}</button>`:(opts.indent?'':'<span style="width:20px; flex-shrink:0;"></span>')}
@@ -2640,7 +2750,7 @@ function renderTaskRow(t, catId, groupId, opts){
       ${hasKids?`<span class="task-due" style="background:var(--surface-2); color:var(--text-dim);">${opts.doneChildCount}/${opts.childCount}</span>`:''}
       ${t.repeat?`<span class="iconbtn" style="cursor:default; color:var(--text-faint);" title="${escapeHtml(taskRepeatLabel(t))}">${icon('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',13)}</span>`:''}
       ${t.description?`<span class="iconbtn" style="cursor:default; color:var(--text-faint);" title="${escapeHtml(t.description)}">${icon('<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',13)}</span>`:''}
-      ${t.due?`<span class="task-due" style="background:${overdue?'var(--danger-soft)':'var(--surface-2)'}; color:${overdue?'var(--danger)':'var(--text-dim)'}">${t.due}</span>`:''}
+      ${(t.due && (!t.repeat || overdue))?`<span class="task-due" style="background:${overdue?'var(--danger-soft)':'var(--surface-2)'}; color:${overdue?'var(--danger)':'var(--text-dim)'}">${t.due}</span>`:''}
       ${!opts.indent?`<button class="iconbtn" data-add-subtask="${t.id}" title="Add sub-task">${icon('<path d="M12 5v14"/><path d="M5 12h14"/>',13)}</button>`:''}
       <button class="iconbtn" data-del-task="${catId}:${groupId||''}:${t.id}">${icon('<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',13)}</button>
     </div>`;
@@ -2790,11 +2900,12 @@ function openTaskEditModal(catId, groupId, taskId, anchor){
   });
 }
 function renderFilteredView(main){
-  // Repeating tasks usually have no due date at all — they're "due" whenever
-  // they're scheduled to repeat, not on a fixed calendar date — so the Today
-  // tab has to check taskScheduledOn for them instead of requiring t.due.
+  // Repeating tasks are "due" whenever they're scheduled — or overdue from a
+  // missed occurrence, which stays relevant regardless of today's schedule —
+  // rather than a fixed calendar date, so the Today tab checks
+  // taskRelevantToday for them instead of requiring t.due to be in the future.
   const list = allTasks().filter(t=>!taskDoneToday(t)).filter(t=>{
-    if(t.repeat) return checklistState.filter==="today" && taskScheduledOn(t, todayISO());
+    if(t.repeat) return checklistState.filter==="today" && taskRelevantToday(t);
     if(!t.due) return false;
     if(checklistState.filter==="today") return t.due<=todayISO();
     if(checklistState.filter==="upcoming") return t.due>todayISO() && daysBetween(todayISO(),t.due)<=7;
@@ -2804,7 +2915,10 @@ function renderFilteredView(main){
   main.innerHTML = list.map(t=>{
     const cat = state.tasks.find(c=>c.id===t.catId);
     const overdue = t.due && t.due < todayISO();
-    const dueLabel = t.due ? t.due : taskRepeatLabel(t);
+    // Repeat tasks now always carry a real due date once touched, but showing
+    // the raw date every day would be noisier than useful — show the repeat
+    // schedule normally, and only surface the actual stale date when overdue.
+    const dueLabel = t.repeat ? (overdue ? t.due : taskRepeatLabel(t)) : t.due;
     return `<div class="task-row">
       <div class="task-check" data-toggle="${t.catId}:${t.groupId||''}:${t.id}"></div>
       <span class="dot" style="background:${cat?cat.color:'#aaa'}"></span>
@@ -3136,7 +3250,7 @@ function renderTrendChart(){
   box.innerHTML = svg;
 }
 function renderTaskDonut(){
-  const all = allTasks().filter(t=> taskScheduledOn(t, todayISO()));
+  const all = allTasks().filter(t=> taskRelevantToday(t));
   const done = all.filter(t=>taskDoneToday(t)).length, total = all.length;
   const pct = total? Math.round(done/total*100):0;
   const r=42, c=2*Math.PI*r;
@@ -3268,16 +3382,24 @@ document.getElementById("resetBtn").addEventListener("click", ()=>{
 
 /* ===================== init ===================== */
 function init(){
+  runDailyRollover();
   renderNav();
   applyTheme();
   initSync();
   const startTab = state.settings.lastTab || "overview";
   switchTab(startTab);
   setInterval(()=>{
+    if(document.visibilityState!=="visible") return; // don't keep rebuilding the DOM while the window is hidden/backgrounded
+    // Catches the app being left open across midnight — re-check whether a new
+    // day has begun, and if so refresh so overdue/cleanup state shows up
+    // without needing a reload. Skipped while typing, same as the sync guard.
+    const typing = document.activeElement && ["INPUT","TEXTAREA"].includes(document.activeElement.tagName);
+    if(!typing && runDailyRollover()){ save(); switchTab(state.settings.lastTab || "overview"); }
     if(document.getElementById("tab-timetable").classList.contains("active")) renderTimetable();
     if(document.getElementById("tab-overview").classList.contains("active")) renderOverview();
   }, 30000);
   setInterval(()=>{
+    if(document.visibilityState!=="visible") return;
     if(document.getElementById("tab-overview").classList.contains("active")) renderUpNext();
   }, 1000);
 }
