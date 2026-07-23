@@ -875,9 +875,7 @@ async function initSync(){
   if(!syncCfg || !syncCfg.url || !syncCfg.anonKey) return;
   if(typeof window.supabase==="undefined"){ syncStatus="error"; return; }
   try{
-    // detectSessionInUrl off: we exchange the PKCE code ourselves below, explicitly,
-    // so a failure surfaces as a real error instead of silently doing nothing.
-    sb = window.supabase.createClient(syncCfg.url, syncCfg.anonKey, { auth: { detectSessionInUrl:false, flowType:"pkce" } });
+    sb = window.supabase.createClient(syncCfg.url, syncCfg.anonKey);
   }catch(e){ syncStatus="error"; return; }
   sb.auth.onAuthStateChange((event, session)=>{
     syncSession = session;
@@ -903,33 +901,7 @@ async function initSync(){
   // interval doesn't depend on any of that firing correctly.
   setInterval(()=>{ if(document.visibilityState==="visible") syncNow(); }, 45000);
 
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get("code");
-  // Older/implicit-flow links put the tokens after a "#", not a "?" — Supabase
-  // has used both formats depending on project settings, so we handle either.
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const hashAccessToken = hashParams.get("access_token");
-  const hashRefreshToken = hashParams.get("refresh_token");
-  const authErr = params.get("error_description") || hashParams.get("error_description");
-
-  try{
-    if(authErr){
-      toast("Sign-in link error: "+decodeURIComponent(authErr));
-      history.replaceState(null, "", window.location.pathname);
-    } else if(code){
-      history.replaceState(null, "", window.location.pathname);
-      const { error } = await sb.auth.exchangeCodeForSession(code);
-      if(error) toast("Couldn't complete sign-in: "+error.message);
-    } else if(hashAccessToken && hashRefreshToken){
-      history.replaceState(null, "", window.location.pathname);
-      const { error } = await sb.auth.setSession({ access_token: hashAccessToken, refresh_token: hashRefreshToken });
-      if(error) toast("Couldn't complete sign-in: "+error.message);
-    }
-    // No code/hash in the URL: nothing to do here — onAuthStateChange's
-    // INITIAL_SESSION event (above) restores any existing session on its own.
-  }catch(e){
-    toast("Sign-in failed: "+(e && e.message ? e.message : "unknown error"));
-  }
+  // onAuthStateChange's INITIAL_SESSION event restores any existing saved session
 }
 async function syncNow(manual){
   if(!sb || !syncSession){ if(manual) toast("Not signed in"); return; }
@@ -1092,63 +1064,49 @@ function renderSyncPanel(){
   }
   if(!syncSession){
     el.innerHTML = `
-      <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Sign in with your email to sync — no password.</p>
-      <label class="field">Email<input class="input" id="syncEmail" type="email" placeholder="you@example.com"></label>
-      <button class="btn btn-primary" id="syncSendCode" style="min-width:110px;">Send code</button>
-      <div id="syncSentWrap" style="display:none; margin-top:12px;">
-        <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:10px;">Enter the 6-digit code from the email.</p>
-        <label class="field">Code<input class="input" id="syncOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"></label>
-        <button class="btn btn-primary" id="syncVerify">Verify code</button>
+      <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Sign in with email &amp; password to sync across devices. <b>Make an account once</b>, then just sign in.</p>
+      <label class="field">Email<input class="input" id="syncEmail" type="email" placeholder="you@example.com" autocomplete="email"></label>
+      <label class="field">Password<input class="input" id="syncPassword" type="password" placeholder="Enter password" autocomplete="current-password"></label>
+      <div id="syncAuthError" style="font-size:12.5px; color:var(--danger); margin-bottom:8px; display:none;"></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="syncSignInBtn" style="flex:1; min-width:100px;">Sign in</button>
+        <button class="btn" id="syncSignUpBtn" style="flex:1; min-width:100px;">Sign up</button>
       </div>
       <button class="btn btn-sm" id="syncForget" style="margin-top:12px;">Use a different project</button>`;
-    let resendCooldown = null;
-    function startResendCooldown(seconds){
-      const btn = el.querySelector("#syncSendCode");
-      if(!btn) return;
-      clearInterval(resendCooldown);
-      let remaining = seconds;
-      btn.disabled = true;
-      btn.textContent = `Resend in ${remaining}s`;
-      resendCooldown = setInterval(()=>{
-        remaining--;
-        if(remaining <= 0){ clearInterval(resendCooldown); btn.disabled = false; btn.textContent = "Resend code"; return; }
-        btn.textContent = `Resend in ${remaining}s`;
-      }, 1000);
-    }
-    el.querySelector("#syncSendCode").addEventListener("click", async ()=>{
+    const showError = msg => {
+      const errEl = el.querySelector("#syncAuthError");
+      if(msg){ errEl.textContent = msg; errEl.style.display = "block"; }
+      else errEl.style.display = "none";
+    };
+    el.querySelector("#syncSignInBtn").addEventListener("click", async ()=>{
       const email = el.querySelector("#syncEmail").value.trim();
-      if(!email){ toast("Enter your email first"); return; }
-      const btn = el.querySelector("#syncSendCode"); btn.textContent = "Sending…"; btn.disabled = true;
-      const { error } = await sb.auth.signInWithOtp({ email, options:{ shouldCreateUser:true } });
-      if(error){
-        btn.textContent = "Send code"; btn.disabled = false;
-        if(error.status===429 || /rate.?limit/i.test(error.message)) toast("Too many emails sent — wait a minute and try again");
-        else toast("Couldn't send: "+error.message);
-        return;
-      }
-      el.querySelector("#syncSentWrap").style.display = "block";
-      el.querySelector("#syncOtp").focus();
-      toast("Check your email for the code");
-      startResendCooldown(60); // matches Supabase's server-side per-address cooldown
+      const password = el.querySelector("#syncPassword").value;
+      if(!email || !password){ toast("Enter your email and password"); return; }
+      showError(null);
+      const btn = el.querySelector("#syncSignInBtn"); btn.textContent = "Signing in…"; btn.disabled = true;
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      btn.textContent = "Sign in"; btn.disabled = false;
+      if(error) showError(error.message);
     });
-    el.querySelector("#syncVerify").addEventListener("click", async ()=>{
+    el.querySelector("#syncSignUpBtn").addEventListener("click", async ()=>{
       const email = el.querySelector("#syncEmail").value.trim();
-      const token = el.querySelector("#syncOtp").value.trim();
-      if(!token){ toast("Enter the code from your email"); return; }
-      const btn = el.querySelector("#syncVerify"); btn.textContent = "Verifying…"; btn.disabled = true;
-      const { error } = await sb.auth.verifyOtp({ email, token, type:"email" });
-      btn.textContent = "Verify code"; btn.disabled = false;
-      if(error){
-        if(/expired/i.test(error.message)) toast("Code expired or incorrect — send a new one");
-        else toast("Couldn't verify: "+error.message);
-        return;
-      }
+      const password = el.querySelector("#syncPassword").value;
+      if(!email || !password){ toast("Enter your email and password"); return; }
+      if(password.length < 6){ toast("Password must be at least 6 characters"); return; }
+      showError(null);
+      const btn = el.querySelector("#syncSignUpBtn"); btn.textContent = "Signing up…"; btn.disabled = true;
+      const { data, error } = await sb.auth.signUp({ email, password });
+      btn.textContent = "Sign up"; btn.disabled = false;
+      if(error) showError(error.message);
+      else if(data.user && !data.session) toast("Check your email for a confirmation link, then sign in");
     });
     el.querySelector("#syncForget").addEventListener("click", ()=>{
       if(confirm("Disconnect this Supabase project? Your data stays as-is, both locally and in the cloud.")){
         localStorage.removeItem(SYNC_CFG_KEY); syncCfg=null; sb=null; syncSession=null; renderSyncPanel();
       }
     });
+    el.querySelector("#syncEmail").addEventListener("keydown", e=>{ if(e.key==="Enter") el.querySelector("#syncPassword").focus(); });
+    el.querySelector("#syncPassword").addEventListener("keydown", e=>{ if(e.key==="Enter") el.querySelector("#syncSignInBtn").click(); });
     return;
   }
   const statusText = syncStatus==="checking" ? "Checking…" : syncStatus==="error" ? "Sync error — will retry" : "Synced";
