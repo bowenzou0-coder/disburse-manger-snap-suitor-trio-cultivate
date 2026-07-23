@@ -44,7 +44,10 @@ function openPopover(anchor, title, bodyHtml, onMount){
       arrow.className = "popover-arrow arrow-bottom";
     }
   });
-  const outside = e=>{ if(!pop.contains(e.target) && e.target!==anchor && !anchor.contains(e.target)) closePopover(); };
+  const outside = e=>{
+    if(activeCselDropdown && activeCselDropdown.el.contains(e.target)) return;
+    if(!pop.contains(e.target) && e.target!==anchor && !anchor.contains(e.target)) closePopover();
+  };
   const esc = e=>{ if(e.key==="Escape") closePopover(); };
   setTimeout(()=> document.addEventListener("mousedown", outside, true), 0);
   document.addEventListener("keydown", esc);
