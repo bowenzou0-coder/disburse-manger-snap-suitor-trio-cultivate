@@ -1049,7 +1049,7 @@ function renderSyncPanel(){
     el.innerHTML = `
       <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Connect a free Supabase project to sync your data across devices.</p>
       <label class="field">Project URL<input class="input" id="syncUrl" placeholder="https://xxxx.supabase.co"></label>
-      <label class="field">Anon public key<input class="input" id="syncKey" placeholder="eyJ..."></label>
+      <label class="field">Publishable key<input class="input" id="syncKey" placeholder="eyJ..."></label>
       <button class="btn btn-primary" id="syncConnectBtn">Connect</button>`;
     el.querySelector("#syncConnectBtn").addEventListener("click", ()=>{
       const url = el.querySelector("#syncUrl").value.trim();
