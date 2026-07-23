@@ -115,13 +115,6 @@ function findTaskArr(catId, groupId){
   const cat = state.tasks.find(c=>c.id===catId); if(!cat) return null;
   return groupId ? (cat.groups.find(g=>g.id===groupId)||{}).tasks : cat.tasks;
 }
-function makeTask(overrides){
-  return Object.assign({
-    id:uid(), title:"", done:false, due:null, priority:0, completedAt:null,
-    repeat:null, repeatDays:[], completedDates:[], description:"",
-    parentId:null, collapsed:false
-  }, overrides);
-}
 function wireTaskEvents(root){
   root.querySelectorAll("[data-toggle]").forEach(el=> el.addEventListener("click", ()=>{
     const [catId, groupId, taskId] = el.dataset.toggle.split(":");

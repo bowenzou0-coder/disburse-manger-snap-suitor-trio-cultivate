@@ -13,6 +13,13 @@ const TABS = [
   {id:"settings", label:"Settings", icon:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.96 19.7a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.96a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.96 4.6a1.7 1.7 0 0 0 1.04-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.04 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 8.96a1.7 1.7 0 0 0 1.56 1.04H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.04z"/>'}
 ];
 
+function makeTask(overrides){
+  return Object.assign({
+    id:uid(), title:"", done:false, due:null, priority:0, completedAt:null,
+    repeat:null, repeatDays:[], completedDates:[], description:"",
+    parentId:null, collapsed:false
+  }, overrides);
+}
 function seedSubjects(){
   const names = ["Chemistry","Biology","Maths Ext 1","Maths Advanced","English Advanced","Latin Continuers","Economics"];
   return names.map((n,i)=>({id:uid(), name:n, color:PALETTE[i % PALETTE.length]}));
@@ -53,7 +60,13 @@ function loadState(){
     return merged;
   }catch(e){ return defaultState(); }
 }
-function save(){ localStorage.setItem(KEY, JSON.stringify(state)); schedulePush(); }
+const BACKUP_KEY = KEY + ".bak";
+function save(){
+  const prev = localStorage.getItem(KEY);
+  if(prev) localStorage.setItem(BACKUP_KEY, prev);
+  localStorage.setItem(KEY, JSON.stringify(state));
+  schedulePush();
+}
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 function isoDate(d){ d = d||new Date(); const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0"); return `${y}-${m}-${day}`; }
