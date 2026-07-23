@@ -879,12 +879,17 @@ async function initSync(){
   }catch(e){ syncStatus="error"; return; }
   sb.auth.onAuthStateChange((event, session)=>{
     syncSession = session;
-    if(event==="SIGNED_IN" || (event==="INITIAL_SESSION" && session)){
-      // Fires both right after a fresh sign-in AND on every normal page load
-      // where a session is already persisted — syncNow() is cheap and safe to
-      // call every time (it no-ops if the cloud copy isn't newer than what we
-      // already have), so every app open silently catches up instead of
-      // trusting a stale "Synced" badge.
+    if(event==="PASSWORD_RECOVERY"){
+      // User clicked a password reset link — prompt for new password
+      syncSession = session;
+      const newPw = prompt("Enter your new password (at least 6 characters):");
+      if(newPw && newPw.length >= 6){
+        sb.auth.updateUser({ password: newPw }).then(({ error })=>{
+          if(error) toast("Couldn't reset password: "+error.message);
+          else{ toast("Password updated! Signing in…"); sb.auth.signOut(); }
+        });
+      }
+    } else if(event==="SIGNED_IN" || (event==="INITIAL_SESSION" && session)){
       syncNow();
     } else if(event==="SIGNED_OUT"){
       syncSession=null; syncStatus="idle";
@@ -1072,7 +1077,8 @@ function renderSyncPanel(){
         <button class="btn btn-primary" id="syncSignInBtn" style="flex:1; min-width:100px;">Sign in</button>
         <button class="btn" id="syncSignUpBtn" style="flex:1; min-width:100px;">Sign up</button>
       </div>
-      <button class="btn btn-sm" id="syncForget" style="margin-top:12px;">Use a different project</button>`;
+      <button class="btn btn-sm" id="syncForgotPw" style="margin-top:4px;">Forgot password?</button>
+      <button class="btn btn-sm" id="syncForget" style="margin-top:4px;">Use a different project</button>`;
     const showError = msg => {
       const errEl = el.querySelector("#syncAuthError");
       if(msg){ errEl.textContent = msg; errEl.style.display = "block"; }
@@ -1099,6 +1105,13 @@ function renderSyncPanel(){
       btn.textContent = "Sign up"; btn.disabled = false;
       if(error) showError(error.message);
       else if(data.user && !data.session) toast("Check your email for a confirmation link, then sign in");
+    });
+    el.querySelector("#syncForgotPw").addEventListener("click", async ()=>{
+      const email = el.querySelector("#syncEmail").value.trim();
+      if(!email){ toast("Enter your email first"); return; }
+      const { error } = await sb.auth.resetPasswordForEmail({ email, redirectTo: window.location.origin + window.location.pathname });
+      if(error) showError(error.message);
+      else toast("Check your email for a password reset link");
     });
     el.querySelector("#syncForget").addEventListener("click", ()=>{
       if(confirm("Disconnect this Supabase project? Your data stays as-is, both locally and in the cloud.")){
