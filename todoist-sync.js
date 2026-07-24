@@ -44,6 +44,16 @@ function todoistToast(msg){
   toast(msg);
 }
 
+function todoistToArray(data){
+  if(Array.isArray(data)) return data;
+  if(data && typeof data==="object"){
+    if(Array.isArray(data.results)) return data.results;
+    if(Array.isArray(data.items)) return data.items;
+    if(Array.isArray(data.data)) return data.data;
+  }
+  return [];
+}
+
 async function todoistFetch(path, opts, attempt){
   attempt = attempt || 0;
   opts = opts || {};
@@ -172,9 +182,9 @@ async function todoistPull(){
   if(!todoistToken) return false;
 
   const [tdProjects, tdSections, tdTasks] = await Promise.all([
-    todoistFetch("/projects"),
-    todoistFetch("/sections"),
-    todoistFetch("/tasks")
+    todoistFetch("/projects").then(todoistToArray),
+    todoistFetch("/sections").then(todoistToArray),
+    todoistFetch("/tasks").then(todoistToArray)
   ]);
 
   let changed = false;
