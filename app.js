@@ -17,7 +17,7 @@ function makeTask(overrides){
   return Object.assign({
     id:uid(), title:"", done:false, due:null, priority:0, completedAt:null,
     repeat:null, repeatDays:[], completedDates:[], description:"",
-    parentId:null, collapsed:false
+    parentId:null, collapsed:false, todoistId:null
   }, overrides);
 }
 function seedSubjects(){
@@ -40,10 +40,10 @@ function defaultState(){
 function normalizeTasksSlice(cats){
   return (cats||[]).map(cat=>({
     id: cat.id, name: cat.name||"Untitled", color: cat.color||"#888888",
-    description: cat.description||"",
+    description: cat.description||"", todoistId: cat.todoistId||null,
     tasks: (cat.tasks||[]).map(t=>makeTask(t)),
     groups: (cat.groups||[]).map(g=>({
-      id: g.id, name: g.name||"Untitled",
+      id: g.id, name: g.name||"Untitled", todoistSectionId: g.todoistSectionId||null,
       tasks: (g.tasks||[]).map(t=>makeTask(t))
     }))
   }));
@@ -66,6 +66,7 @@ function save(){
   if(prev) localStorage.setItem(BACKUP_KEY, prev);
   localStorage.setItem(KEY, JSON.stringify(state));
   schedulePush();
+  if(typeof scheduleTodoistPush === "function") scheduleTodoistPush();
 }
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }

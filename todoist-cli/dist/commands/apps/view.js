@@ -1,0 +1,125 @@
+import chalk from 'chalk';
+import { getApi } from '../../lib/api/core.js';
+import { resolveAppRef } from '../../lib/refs.js';
+import { appInstallUrl } from '../../lib/urls.js';
+import { parseOAuthRedirectUris } from './helpers.js';
+const HIDDEN_HINT = '(hidden — pass --include-secrets to reveal)';
+function hiddenLine(label) {
+    return `  ${label}${chalk.dim(HIDDEN_HINT)}`;
+}
+// Renders a UI extension's type alongside its variant-specific sub-type, e.g.
+// "context-menu: project" or "composer: task". Settings extensions have no sub-type.
+// Branches are exhaustive over the SDK's UiExtension union so a new variant fails to
+// compile (via the `never` fallback) rather than silently rendering a partial label.
+function formatExtensionType(ext) {
+    switch (ext.extensionType) {
+        case 'context-menu':
+            return `${ext.extensionType}: ${ext.contextType}`;
+        case 'composer':
+            return `${ext.extensionType}: ${ext.composerType}`;
+        case 'settings':
+            return ext.extensionType;
+        default: {
+            const _exhaustive = ext;
+            return _exhaustive;
+        }
+    }
+}
+export async function viewApp(ref, options = {}) {
+    const api = await getApi();
+    const app = await resolveAppRef(api, ref);
+    const revealSecrets = Boolean(options.includeSecrets);
+    // Secret-bearing endpoints (getAppSecrets for clientSecret, verification and test
+    // tokens) are gated on `revealSecrets` so we never transport secret data onto the
+    // user's machine unless they asked for it.
+    const [webhook, uiExtensions, secrets, verification, testToken] = await Promise.all([
+        api.getAppWebhook(app.id),
+        api.getUiExtensionsForApp(app.id),
+        revealSecrets ? api.getAppSecrets(app.id) : Promise.resolve(null),
+        revealSecrets ? api.getAppVerificationToken(app.id) : Promise.resolve(null),
+        revealSecrets ? api.getAppTestToken(app.id) : Promise.resolve(null),
+    ]);
+    // The distribution token underpins the shareable install URL — not a secret, but
+    // only relevant when the app has UI extensions (plain output) or for the full JSON
+    // payload, so we skip the call entirely in the common no-extensions plain path.
+    const wantsJson = Boolean(options.json || options.ndjson);
+    const distribution = wantsJson || uiExtensions.length > 0 ? await api.getAppDistributionToken(app.id) : null;
+    const distributionToken = distribution?.distributionToken ?? null;
+    const installUrl = uiExtensions.length > 0 && distributionToken ? appInstallUrl(distributionToken) : null;
+    if (options.json || options.ndjson) {
+        const payload = {
+            ...app,
+            webhook,
+            uiExtensions,
+            distributionToken,
+            installUrl,
+        };
+        if (revealSecrets && secrets) {
+            payload.clientSecret = secrets.clientSecret;
+            payload.verificationToken = verification?.verificationToken ?? null;
+            payload.testToken = { accessToken: testToken?.accessToken ?? null };
+        }
+        const indent = options.json ? 2 : undefined;
+        console.log(JSON.stringify(payload, null, indent));
+        return;
+    }
+    const created = app.createdAt.toISOString().slice(0, 10);
+    const scopes = app.appTokenScopes && app.appTokenScopes.length > 0
+        ? app.appTokenScopes.join(', ')
+        : '(none)';
+    console.log(chalk.bold(app.displayName));
+    console.log('');
+    console.log(`  ID:                 ${app.id}`);
+    console.log(`  Status:             ${app.status}`);
+    console.log(`  Users:              ${app.userCount}`);
+    console.log(`  Created:            ${created}`);
+    console.log(`  Service URL:        ${app.serviceUrl || '(none)'}`);
+    const oauthUris = parseOAuthRedirectUris(app.oauthRedirectUri);
+    if (oauthUris.length === 0) {
+        console.log(`  OAuth redirect:     (none)`);
+    }
+    else {
+        console.log(`  OAuth redirect:     ${oauthUris[0]}`);
+        for (const uri of oauthUris.slice(1)) {
+            console.log(`                      ${uri}`);
+        }
+    }
+    console.log(`  Token scopes:       ${scopes}`);
+    if (app.iconMd) {
+        console.log(`  Icon:               ${chalk.dim(app.iconMd)}`);
+    }
+    console.log('');
+    console.log(`  Client ID:          ${app.clientId}`);
+    if (revealSecrets && secrets) {
+        console.log(`  Client secret:      ${secrets.clientSecret}`);
+        console.log(`  Verification token: ${verification?.verificationToken ?? '(none)'}`);
+        const accessToken = testToken?.accessToken;
+        console.log(`  Test token:         ${accessToken == null ? chalk.dim('(not created)') : accessToken}`);
+    }
+    else {
+        console.log(hiddenLine('Client secret:      '));
+        console.log(hiddenLine('Verification token: '));
+        console.log(hiddenLine('Test token:         '));
+    }
+    if (webhook === null) {
+        console.log(`  Webhook:            ${chalk.dim('(not configured)')}`);
+    }
+    else {
+        console.log(`  Webhook:            ${webhook.status} — ${webhook.callbackUrl}`);
+        console.log(`  Webhook events:     ${webhook.events.join(', ') || '(none)'}`);
+        console.log(`  Webhook version:    ${webhook.version}`);
+    }
+    if (uiExtensions.length > 0) {
+        const [first, ...rest] = uiExtensions;
+        console.log(`  UI extensions:      ${first.name} (${formatExtensionType(first)})`);
+        for (const ext of rest) {
+            console.log(`                      ${ext.name} (${formatExtensionType(ext)})`);
+        }
+        if (installUrl) {
+            console.log(`  Install URL:        ${installUrl}`);
+        }
+    }
+    console.log('');
+    console.log(app.description ?? chalk.dim('(no description)'));
+}
+//# sourceMappingURL=view.js.map

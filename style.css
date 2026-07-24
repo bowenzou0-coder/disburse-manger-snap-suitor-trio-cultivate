@@ -112,7 +112,7 @@ h1,h2,h3,p{margin:0;}
 .btn-danger{color:var(--danger); border-color:var(--danger-soft);}
 .btn-danger:hover{background:var(--danger-soft);}
 .btn-sm{padding:5px 10px; font-size:12.5px;}
-.modal .btn, #syncPanel .btn { white-space:normal; overflow-wrap:anywhere; height:auto; text-align:center; }
+.modal .btn, #syncPanel .btn, #todoistPanel .btn { white-space:normal; overflow-wrap:anywhere; height:auto; text-align:center; }
 .btn-icon{padding:6px; width:30px; height:30px; justify-content:center;}
 .input,select,textarea{width:100%; padding:8px 11px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--bg); font-size:13.5px; outline:none;}
 .input:focus,select:focus,textarea:focus{border-color:var(--accent);}

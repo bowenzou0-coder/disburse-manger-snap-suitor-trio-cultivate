@@ -8,6 +8,11 @@ function ensureActiveCat(){
   return checklistState.activeCat;
 }
 function renderChecklist(){
+  const badge = document.getElementById("checklistTodoistBadge");
+  if(badge && todoistToken){
+    const cls = todoistSyncStatus==="synced"?"badge-success":todoistSyncStatus==="syncing"?"badge-warn":todoistSyncStatus==="error"?"badge-danger":"badge-muted";
+    badge.innerHTML = `<span class="badge ${cls}" style="font-size:10px;">Todoist: ${todoistSyncStatus==="syncing"?"syncing…":todoistSyncStatus==="synced"?"synced":todoistSyncStatus==="error"?"error":"connected"}</span>`;
+  } else if(badge) badge.innerHTML = "";
   document.getElementById("checklistFilters").innerHTML = ["all","today","upcoming"].map(f=>
     `<button class="${checklistState.filter===f?'active':''}" data-filter="${f}">${f==="all"?"All":f==="today"?"Today":"Upcoming"}</button>`).join("");
   document.getElementById("checklistFilters").querySelectorAll("button").forEach(b=>

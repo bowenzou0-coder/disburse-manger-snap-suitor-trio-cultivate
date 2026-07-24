@@ -2,6 +2,7 @@
 
 function renderSettings(){
   renderSyncPanel();
+  renderTodoistPanel();
   document.getElementById("subjList").innerHTML = state.subjects.map(s=>`
     <div class="subj-row">
       <input type="color" class="color-input" value="${s.color}" data-subj-color="${s.id}">

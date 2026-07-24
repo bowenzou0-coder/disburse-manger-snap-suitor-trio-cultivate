@@ -1,0 +1,1 @@
+{"version":3,"file":"uninstall.d.ts","sourceRoot":"","sources":["../../../src/commands/skill/uninstall.ts"],"names":[],"mappings":"AAIA,MAAM,WAAW,gBAAgB;IAC7B,KAAK,CAAC,EAAE,OAAO,CAAA;CAClB;AAED,wBAAsB,cAAc,CAAC,KAAK,EAAE,MAAM,EAAE,OAAO,EAAE,gBAAgB,GAAG,OAAO,CAAC,IAAI,CAAC,CAc5F"}

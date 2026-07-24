@@ -1,0 +1,1 @@
+{"version":3,"file":"index.d.ts","sourceRoot":"","sources":["../../../src/commands/settings/index.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,OAAO,EAAU,MAAM,WAAW,CAAA;AAc3C,OAAO,EACH,mBAAmB,EACnB,WAAW,EACX,eAAe,EACf,QAAQ,EACR,UAAU,EACV,eAAe,EACf,aAAa,EACb,mBAAmB,GACtB,MAAM,cAAc,CAAA;AAErB,wBAAgB,uBAAuB,CAAC,OAAO,EAAE,OAAO,GAAG,IAAI,CAmE9D"}

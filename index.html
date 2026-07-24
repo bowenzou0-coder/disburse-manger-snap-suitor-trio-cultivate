@@ -147,6 +147,7 @@
     <!-- CHECKLIST -->
     <section class="tab" id="tab-checklist">
       <div class="topbar"><div><h1>Checklist</h1><div class="sub">Categories, sections, tasks — Todoist style</div></div>
+        <div id="checklistTodoistBadge"></div>
       </div>
       <div class="filter-tabs" id="checklistFilters"></div>
       <div class="checklist-wrap">
@@ -229,6 +230,10 @@
           <div class="section-title">Sync across devices</div>
           <div id="syncPanel"></div>
         </div>
+        <div class="card">
+          <div class="section-title">Todoist sync</div>
+          <div id="todoistPanel"></div>
+        </div>
       </div>
     </section>
   </main>
@@ -244,6 +249,7 @@
 <script src="checklist.js"></script>
 <script src="marks.js"></script>
 <script src="analytics.js"></script>
+<script src="todoist-sync.js"></script>
 <script src="settings.js"></script>
 <script>
 (function(){
@@ -253,6 +259,7 @@ function init(){
   renderNav();
   applyTheme();
   initSync();
+  initTodoistSync();
   const startTab = state.settings.lastTab || "overview";
   switchTab(startTab);
   setInterval(()=>{

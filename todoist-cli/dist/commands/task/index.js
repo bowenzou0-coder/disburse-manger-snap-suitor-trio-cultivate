@@ -1,0 +1,233 @@
+import { Option } from 'commander';
+import { withCaseInsensitiveChoices } from '../../lib/completion.js';
+import { CURSOR_DESCRIPTION } from '../../lib/constants.js';
+import { CliError } from '../../lib/errors.js';
+import { PRIORITY_CHOICES } from '../../lib/task-list.js';
+import { addTask } from './add.js';
+import { browseTask } from './browse.js';
+import { completeTask } from './complete.js';
+import { deleteTask } from './delete.js';
+import { listTasks } from './list.js';
+import { moveTask } from './move.js';
+import { quickaddTask } from './quickadd.js';
+import { rescheduleTask } from './reschedule.js';
+import { uncompleteTask } from './uncomplete.js';
+import { updateTask } from './update.js';
+import { viewTask } from './view.js';
+export { viewTask } from './view.js';
+export function registerTaskCommand(program) {
+    const task = program
+        .command('task')
+        .description('Manage tasks')
+        .addHelpText('after', `
+Examples:
+  td task add "Buy milk" --due tomorrow
+  td task qa "Buy milk tomorrow p1 #Shopping"
+  td task list --project "Work" --priority p1
+  td task view "Buy milk"`);
+    task.command('list')
+        .description('List tasks')
+        .option('--project <name>', 'Filter by project name or id:xxx')
+        .option('--parent <ref>', 'Filter subtasks of a parent task')
+        .option('--label <name>', 'Filter by label (comma-separated for multiple)')
+        .addOption(withCaseInsensitiveChoices(new Option('--priority <p1-p4>', 'Filter by priority'), PRIORITY_CHOICES))
+        .option('--due <date>', 'Filter by due date (today, overdue, or YYYY-MM-DD)')
+        .option('--filter <query>', 'Raw Todoist filter query')
+        .option('--assignee <ref>', 'Filter by assignee (me or id:xxx)')
+        .option('--unassigned', 'Show only unassigned tasks')
+        .option('--workspace <name>', 'Filter to tasks in workspace')
+        .option('--personal', 'Filter to tasks in personal projects')
+        .option('--limit <n>', 'Limit number of results (default: 300)')
+        .option('--cursor <cursor>', CURSOR_DESCRIPTION)
+        .option('--all', 'Fetch all results (no limit)')
+        .option('--json', 'Output as JSON')
+        .option('--ndjson', 'Output as newline-delimited JSON')
+        .option('--full', 'Include all fields in JSON output')
+        .option('--raw', 'Disable markdown rendering')
+        .option('--show-urls', 'Show web app URLs for each task')
+        .action(listTasks);
+    task.command('view [ref]', { isDefault: true })
+        .description('View task details')
+        .option('--json', 'Output as JSON')
+        .option('--full', 'Include all fields in output')
+        .option('--raw', 'Disable markdown rendering')
+        .action((ref, options) => {
+        if (!ref) {
+            task.help();
+            return;
+        }
+        return viewTask(ref, options);
+    });
+    const completeCmd = task
+        .command('complete [ref]')
+        .description('Complete a task')
+        .option('--forever', 'Complete recurring task permanently (stops recurrence)')
+        .option('--dry-run', 'Preview what would happen without executing')
+        .action((ref, options) => {
+        if (!ref) {
+            completeCmd.help();
+            return;
+        }
+        return completeTask(ref, options);
+    });
+    const uncompleteCmd = task
+        .command('uncomplete [ref]')
+        .description('Reopen a completed task (requires id:xxx)')
+        .option('--dry-run', 'Preview what would happen without executing')
+        .action((ref, options) => {
+        if (!ref) {
+            uncompleteCmd.help();
+            return;
+        }
+        return uncompleteTask(ref, options);
+    });
+    const deleteCmd = task
+        .command('delete [ref]')
+        .description('Delete a task')
+        .option('--yes', 'Confirm deletion')
+        .option('--dry-run', 'Preview what would happen without executing')
+        .action((ref, options) => {
+        if (!ref) {
+            deleteCmd.help();
+            return;
+        }
+        return deleteTask(ref, options);
+    });
+    const addCmd = task
+        .command('add [content]')
+        .description('Add a task')
+        .option('--content <text>', 'Task content (legacy, prefer positional argument)')
+        .option('--due <date>', 'Due date (YYYY-MM-DD or simple natural language; see Notes below)')
+        .option('--deadline <date>', 'Deadline date (YYYY-MM-DD)')
+        .addOption(withCaseInsensitiveChoices(new Option('--priority <p1-p4>', 'Priority level'), PRIORITY_CHOICES))
+        .option('--project <name>', 'Project name or id:xxx')
+        .option('--section <ref>', 'Section (name with --project, or id:xxx)')
+        .option('--labels <a,b>', 'Comma-separated labels')
+        .option('--parent <ref>', 'Parent task reference')
+        .option('--description <text>', 'Task description')
+        .option('--stdin', 'Read task description from stdin')
+        .option('--assignee <ref>', 'Assign to user (name, email, id:xxx, or "me")')
+        .option('--duration <time>', 'Duration (e.g., 30m, 1h, 2h15m)')
+        .option('--uncompletable', 'Mark task as non-completable (reference/header task)')
+        .option('--order <number>', 'Task position within project/parent (0 = top)', (val) => {
+        const n = Number(val);
+        if (!Number.isInteger(n) || n < 0) {
+            throw new CliError('INVALID_ORDER', `Invalid order value: "${val}"`, [
+                'Order must be a non-negative integer (e.g., 0 for top of list)',
+            ]);
+        }
+        return n;
+    })
+        .option('--json', 'Output the created task as JSON')
+        .option('--dry-run', 'Preview what would happen without executing')
+        .action((contentArg, options) => {
+        if (contentArg && options.content) {
+            throw new CliError('CONFLICTING_OPTIONS', 'Cannot specify content both as argument and --content flag');
+        }
+        const content = contentArg || options.content;
+        if (!content) {
+            addCmd.help();
+            return;
+        }
+        return addTask({ ...options, content });
+    })
+        .addHelpText('after', `
+Notes:
+  --due is sent verbatim as the task's due_string. The server's due_string
+  parser handles simple inputs ("2026-06-01", "tomorrow", "every Monday") but
+  does not unpack some more complex clauses (i.e. "starting <date>").`);
+    const quickaddCmd = task
+        .command('quickadd [text]')
+        .alias('qa')
+        .description('Quick add a task using natural language (e.g. "Buy milk tomorrow p1 #Shopping")')
+        .option('--stdin', 'Read text from stdin')
+        .option('--json', 'Output the created task as JSON')
+        .option('--dry-run', 'Preview what would happen without executing')
+        .action((text, options) => {
+        if (!text && !options.stdin) {
+            quickaddCmd.help();
+            return;
+        }
+        return quickaddTask({ ...options, text });
+    });
+    const updateCmd = task
+        .command('update [ref]')
+        .description('Update a task')
+        .option('--content <text>', 'New content')
+        .option('--due <date>', 'New due date (YYYY-MM-DD or simple natural language; see Notes below)')
+        .option('--no-due', 'Remove due date')
+        .option('--deadline <date>', 'Deadline date (YYYY-MM-DD)')
+        .option('--no-deadline', 'Remove deadline')
+        .addOption(withCaseInsensitiveChoices(new Option('--priority <p1-p4>', 'New priority'), PRIORITY_CHOICES))
+        .option('--labels <a,b>', 'New labels (replaces existing)')
+        .option('--no-labels', 'Remove all labels')
+        .option('--description <text>', 'New description')
+        .option('--stdin', 'Read task description from stdin')
+        .option('--assignee <ref>', 'Assign to user (name, email, id:xxx, or "me")')
+        .option('--unassign', 'Remove assignee')
+        .option('--duration <time>', 'Duration (e.g., 30m, 1h, 2h15m)')
+        .option('--uncompletable', 'Mark task as non-completable')
+        .option('--completable', 'Revert task to completable (undoes --uncompletable)')
+        .option('--order <number>', 'Task position within project/parent (0 = top)', (val) => {
+        const n = Number(val);
+        if (!Number.isInteger(n) || n < 0) {
+            throw new CliError('INVALID_ORDER', `Invalid order value: "${val}"`, [
+                'Order must be a non-negative integer (e.g., 0 for top of list)',
+            ]);
+        }
+        return n;
+    })
+        .option('--json', 'Output the updated task as JSON')
+        .option('--dry-run', 'Preview what would happen without executing')
+        .action((ref, options) => {
+        if (!ref) {
+            updateCmd.help();
+            return;
+        }
+        return updateTask(ref, options);
+    })
+        .addHelpText('after', `
+Notes:
+  --due is sent verbatim as the task's due_string, with the same caveats as
+  "task add --due": the server's due_string parser does not unpack some more
+  complex clauses (i.e. "starting <date>").`);
+    const moveCmd = task
+        .command('move [ref]')
+        .description('Move task to project/section/parent')
+        .option('--project <ref>', 'Target project (name or id:xxx)')
+        .option('--section <ref>', 'Target section (name or id:xxx)')
+        .option('--parent <ref>', 'Parent task (name or id:xxx)')
+        .option('--no-parent', 'Remove parent (move to project root)')
+        .option('--no-section', 'Remove section (move to project root)')
+        .option('--dry-run', 'Preview what would happen without executing')
+        .action((ref, options) => {
+        if (!ref) {
+            moveCmd.help();
+            return;
+        }
+        return moveTask(ref, options);
+    });
+    const rescheduleCmd = task
+        .command('reschedule [ref] [date]')
+        .description('Reschedule a task (preserves recurrence)')
+        .option('--json', 'Output the rescheduled task as JSON')
+        .option('--dry-run', 'Preview what would happen without executing')
+        .action((ref, date, options) => {
+        if (!ref || !date) {
+            rescheduleCmd.help();
+            return;
+        }
+        return rescheduleTask(ref, date, options);
+    });
+    const browseCmd = task
+        .command('browse [ref]')
+        .description('Open task in browser')
+        .action((ref) => {
+        if (!ref) {
+            browseCmd.help();
+            return;
+        }
+        return browseTask(ref);
+    });
+}
+//# sourceMappingURL=index.js.map

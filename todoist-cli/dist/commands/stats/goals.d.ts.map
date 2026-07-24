@@ -1,0 +1,1 @@
+{"version":3,"file":"goals.d.ts","sourceRoot":"","sources":["../../../src/commands/stats/goals.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,OAAO,EAAE,MAAM,WAAW,CAAA;AAIxC,UAAU,YAAY;IAClB,KAAK,CAAC,EAAE,MAAM,CAAA;IACd,MAAM,CAAC,EAAE,MAAM,CAAA;CAClB;AAED,wBAAsB,YAAY,CAAC,OAAO,EAAE,YAAY,EAAE,OAAO,EAAE,OAAO,GAAG,OAAO,CAAC,IAAI,CAAC,CA2BzF"}
