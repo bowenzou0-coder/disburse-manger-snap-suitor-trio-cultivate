@@ -1,1 +1,0 @@
-{"version":3,"file":"login.d.ts","sourceRoot":"","sources":["../../../src/commands/auth/login.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,OAAO,EAAE,MAAM,WAAW,CAAA;AAGxC,OAAO,KAAK,EAAkB,iBAAiB,EAAE,MAAM,yBAAyB,CAAA;AAYhF;;;;;;;;;;GAUG;AACH,wBAAgB,yBAAyB,CAAC,IAAI,EAAE,OAAO,EAAE,KAAK,EAAE,iBAAiB,GAAG,OAAO,CA4E1F"}

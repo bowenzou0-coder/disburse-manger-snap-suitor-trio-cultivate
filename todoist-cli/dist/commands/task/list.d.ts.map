@@ -1,1 +1,0 @@
-{"version":3,"file":"list.d.ts","sourceRoot":"","sources":["../../../src/commands/task/list.ts"],"names":[],"mappings":"AAEA,OAAO,EAAuB,KAAK,eAAe,EAAE,MAAM,wBAAwB,CAAA;AAElF,MAAM,MAAM,WAAW,GAAG,eAAe,GAAG;IAAE,OAAO,CAAC,EAAE,MAAM,CAAA;CAAE,CAAA;AAEhE,wBAAsB,SAAS,CAAC,OAAO,EAAE,WAAW,GAAG,OAAO,CAAC,IAAI,CAAC,CAgBnE"}

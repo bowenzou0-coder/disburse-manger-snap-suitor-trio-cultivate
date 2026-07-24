@@ -1,1 +1,0 @@
-{"version":3,"file":"list.d.ts","sourceRoot":"","sources":["../../../src/commands/backup/list.ts"],"names":[],"mappings":"AAKA,UAAU,kBAAkB;IACxB,IAAI,CAAC,EAAE,OAAO,CAAA;IACd,MAAM,CAAC,EAAE,OAAO,CAAA;CACnB;AAED,wBAAsB,WAAW,CAAC,OAAO,EAAE,kBAAkB,GAAG,OAAO,CAAC,IAAI,CAAC,CAuB5E"}

@@ -1,1 +1,0 @@
-{"version":3,"file":"delete.d.ts","sourceRoot":"","sources":["../../../src/commands/reminder/delete.ts"],"names":[],"mappings":"AAOA,UAAU,aAAa;IACnB,GAAG,CAAC,EAAE,OAAO,CAAA;IACb,MAAM,CAAC,EAAE,OAAO,CAAA;CACnB;AAED,wBAAsB,iBAAiB,CAAC,UAAU,EAAE,MAAM,EAAE,OAAO,EAAE,aAAa,GAAG,OAAO,CAAC,IAAI,CAAC,CAyBjG"}

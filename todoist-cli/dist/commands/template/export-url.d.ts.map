@@ -1,1 +1,0 @@
-{"version":3,"file":"export-url.d.ts","sourceRoot":"","sources":["../../../src/commands/template/export-url.ts"],"names":[],"mappings":"AAIA,MAAM,WAAW,gBAAgB;IAC7B,OAAO,CAAC,EAAE,MAAM,CAAA;IAChB,aAAa,CAAC,EAAE,OAAO,CAAA;IACvB,IAAI,CAAC,EAAE,OAAO,CAAA;CACjB;AAED,wBAAsB,iBAAiB,CACnC,UAAU,EAAE,MAAM,EAClB,OAAO,EAAE,gBAAgB,GAC1B,OAAO,CAAC,IAAI,CAAC,CAiBf"}

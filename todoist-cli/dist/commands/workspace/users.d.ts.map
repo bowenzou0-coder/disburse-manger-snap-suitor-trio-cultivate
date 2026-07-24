@@ -1,1 +1,0 @@
-{"version":3,"file":"users.d.ts","sourceRoot":"","sources":["../../../src/commands/workspace/users.ts"],"names":[],"mappings":"AAIA,OAAO,KAAK,EAAE,oBAAoB,EAAE,MAAM,sBAAsB,CAAA;AAIhE,wBAAsB,kBAAkB,CACpC,GAAG,EAAE,MAAM,GAAG,SAAS,EACvB,OAAO,EAAE,oBAAoB,GAAG;IAAE,IAAI,CAAC,EAAE,MAAM,CAAA;CAAE,GAClD,OAAO,CAAC,IAAI,CAAC,CAyGf"}

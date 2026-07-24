@@ -1,1 +1,0 @@
-{"version":3,"file":"view.d.ts","sourceRoot":"","sources":["../../../src/commands/workspace/view.ts"],"names":[],"mappings":"AAGA,wBAAsB,aAAa,CAC/B,GAAG,EAAE,MAAM,GAAG,SAAS,EACvB,OAAO,GAAE;IAAE,IAAI,CAAC,EAAE,OAAO,CAAC;IAAC,IAAI,CAAC,EAAE,OAAO,CAAA;CAAO,GACjD,OAAO,CAAC,IAAI,CAAC,CAkCf"}

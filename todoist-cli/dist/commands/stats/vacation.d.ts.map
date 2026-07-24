@@ -1,1 +1,0 @@
-{"version":3,"file":"vacation.d.ts","sourceRoot":"","sources":["../../../src/commands/stats/vacation.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,OAAO,EAAE,MAAM,WAAW,CAAA;AAIxC,UAAU,eAAe;IACrB,EAAE,CAAC,EAAE,OAAO,CAAA;IACZ,GAAG,CAAC,EAAE,OAAO,CAAA;CAChB;AAED,wBAAsB,eAAe,CAAC,OAAO,EAAE,eAAe,EAAE,OAAO,EAAE,OAAO,GAAG,OAAO,CAAC,IAAI,CAAC,CAY/F"}
