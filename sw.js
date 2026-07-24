@@ -29,6 +29,7 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
+  if (!req.url.startsWith(self.location.origin) && !req.url.startsWith(self.location.origin.replace("https://","http://"))) return;
 
   event.respondWith(
     caches.match(req).then((cached) => {

@@ -29,14 +29,42 @@ function todoistToAppPriority(tdPri){
   return 0;
 }
 
-async function todoistFetch(path, opts){
+let todoistLastToastTs = 0;
+let todoistToastCount = 0;
+
+function todoistToast(msg){
+  const now = Date.now();
+  if(now - todoistLastToastTs < 8000){
+    todoistToastCount++;
+    if(todoistToastCount > 3) return;
+  } else {
+    todoistToastCount = 0;
+  }
+  todoistLastToastTs = now;
+  toast(msg);
+}
+
+async function todoistFetch(path, opts, attempt){
+  attempt = attempt || 0;
   opts = opts || {};
   if(!todoistToken) throw new Error("No Todoist token");
-  const res = await fetch(TODOIST_API + path, {
-    method: opts.method || "GET",
-    headers: { "Authorization":"Bearer "+todoistToken, "Content-Type":"application/json" },
-    body: opts.body || undefined
-  });
+  const method = opts.method || "GET";
+  const headers = { "Authorization":"Bearer "+todoistToken };
+  if(method !== "GET") headers["Content-Type"] = "application/json";
+  let res;
+  try{
+    res = await fetch(TODOIST_API + path, {
+      method,
+      headers,
+      body: opts.body || undefined
+    });
+  }catch(e){
+    if(attempt < 2){
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      return todoistFetch(path, opts, attempt + 1);
+    }
+    throw new Error("Network error — check your connection or disable ad blockers");
+  }
   if(res.status===401) throw new Error("Invalid Todoist API token");
   if(res.status===429) throw new Error("Todoist rate limit — try again later");
   if(!res.ok) throw new Error("Todoist API "+res.status);
@@ -243,7 +271,7 @@ async function todoistSync(){
   }catch(e){
     todoistSyncStatus = "error";
     console.error("Todoist sync error:", e);
-    toast("Todoist sync failed — "+e.message);
+    todoistToast("Todoist sync failed — "+e.message);
   }
   todoistInFlight = false;
   renderTodoistPanel();
