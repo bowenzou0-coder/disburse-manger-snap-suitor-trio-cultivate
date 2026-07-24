@@ -1,7 +1,6 @@
 "use strict";
 
-const TODOIST_PROXY_URL = "https://oejpzsbwtuwxdszbbilx.supabase.co/functions/v1/todoist-proxy";
-const TODOIST_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lanB6c2J3dHV3eGRzemJiaWx4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MDgyNDMsImV4cCI6MjEwMDI4NDI0M30.85msZeIK-vFSxhv4IDLbUJqrYkRK-66tQ0GblIzZ8ZU";
+const TODOIST_API = "https://api.todoist.com/api/v1";
 const TODOIST_TOKEN_KEY = "keystone.todoistToken";
 const TODOIST_MAP_KEY = "keystone.todoistMap";
 
@@ -50,16 +49,14 @@ async function todoistFetch(path, opts, attempt){
   opts = opts || {};
   if(!todoistToken) throw new Error("No Todoist token");
   const method = opts.method || "GET";
+  const headers = { "Authorization": "Bearer " + todoistToken };
+  if(method !== "GET") headers["Content-Type"] = "application/json";
   let res;
   try{
-    res = await fetch(TODOIST_PROXY_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + TODOIST_ANON_KEY,
-        "apikey": TODOIST_ANON_KEY
-      },
-      body: JSON.stringify({ path, method, body: opts.body || null, token: todoistToken })
+    res = await fetch(TODOIST_API + path, {
+      method,
+      headers,
+      body: opts.body || undefined
     });
   }catch(e){
     if(attempt < 2){
