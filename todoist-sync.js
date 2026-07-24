@@ -181,11 +181,14 @@ async function todoistPushCompletions(){
 async function todoistPull(){
   if(!todoistToken) return false;
 
-  const [tdProjects, tdSections, tdTasks] = await Promise.all([
+  const [tdProjects, tdSections, tdTasks, tdCompleted] = await Promise.all([
     todoistFetch("/projects").then(todoistToArray),
     todoistFetch("/sections").then(todoistToArray),
-    todoistFetch("/tasks").then(todoistToArray)
+    todoistFetch("/tasks").then(todoistToArray),
+    todoistFetch("/tasks/completed").then(todoistToArray)
   ]);
+
+  const completedIds = new Set((tdCompleted||[]).map(t=>t.id));
 
   let changed = false;
   const projById = {};
@@ -238,8 +241,8 @@ async function todoistPull(){
       existing.due = (td.due && td.due.date) ? td.due.date : null;
       existing.priority = todoistToAppPriority(td.priority||0);
       existing.description = td.description || "";
-      existing.done = !!td.is_completed;
-      existing.completedAt = td.is_completed ? (existing.completedAt||todayISO()) : null;
+      existing.done = false;
+      existing.completedAt = null;
       changed = true;
     } else {
       const newTask = makeTask({
@@ -247,13 +250,27 @@ async function todoistPull(){
         due:(td.due && td.due.date) ? td.due.date : null,
         priority:todoistToAppPriority(td.priority||0),
         description:td.description||"",
-        done:!!td.is_completed,
-        completedAt:td.is_completed ? todayISO() : null,
+        done:false,
+        completedAt:null,
         todoistId:td.id,
         parentId:(td.parent_id && todoistMap.tasks[td.parent_id]) ? todoistMap.tasks[td.parent_id].taskId : null
       });
       targetArr.push(newTask);
       todoistMap.tasks[td.id] = { catId:cat.id, taskId:newTask.id };
+      changed = true;
+    }
+  });
+
+  (tdCompleted||[]).forEach(td=>{
+    const mapped = todoistMap.tasks[td.id];
+    if(!mapped) return;
+    const cat = state.tasks.find(c=>c.id===mapped.catId);
+    if(!cat) return;
+    const allArr = cat.tasks.concat((cat.groups||[]).reduce((a,g)=>a.concat(g.tasks||[]),[]));
+    const existing = allArr.find(x=>x.id===mapped.taskId);
+    if(existing && !existing.done){
+      existing.done = true;
+      existing.completedAt = todayISO();
       changed = true;
     }
   });
@@ -296,10 +313,6 @@ function scheduleTodoistPush(){
 function initTodoistSync(){
   loadTodoistMap();
   todoistToken = localStorage.getItem(TODOIST_TOKEN_KEY) || "";
-  if(!todoistToken) return;
-  document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") todoistSync(); });
-  window.addEventListener("focus", ()=> todoistSync());
-  setInterval(()=>{ if(document.visibilityState==="visible") todoistSync(); }, 60000);
 }
 
 function renderTodoistPanel(){

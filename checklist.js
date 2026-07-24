@@ -39,10 +39,6 @@ function renderChecklist(){
   if(!state.tasks.length){ main.innerHTML = `<div class="empty">Add a category to start building your checklist.</div>`; return; }
   const cat = state.tasks.find(c=>c.id===checklistState.activeCat);
   if(!cat){ main.innerHTML = `<div class="empty">Select a category.</div>`; return; }
-  const totalCount = cat.tasks.filter(scheduledToday).length + cat.groups.reduce((a,g)=>a+g.tasks.filter(scheduledToday).length,0);
-  const doneCount = cat.tasks.filter(scheduledToday).filter(t=>taskDoneToday(t)).length
-    + cat.groups.reduce((a,g)=>a+g.tasks.filter(scheduledToday).filter(t=>taskDoneToday(t)).length,0);
-  const pct = totalCount? Math.round(doneCount/totalCount*100):0;
   let html = `<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
       <div style="font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px;"><span class="dot" style="background:${cat.color}"></span>${escapeHtml(cat.name)}</div>
       <div>
@@ -51,7 +47,6 @@ function renderChecklist(){
       </div>
     </div>
     ${cat.description?`<div style="font-size:12.5px; color:var(--text-dim); margin-bottom:10px; white-space:pre-wrap;">${escapeHtml(cat.description)}</div>`:""}
-    <div class="progress-track"><div class="progress-fill" style="width:${pct}%; background:${cat.color};"></div></div>
     <hr class="sep">`;
   html += renderTaskList(cat.tasks, cat.id, null);
   html += `<div class="add-task-row"><input class="input" placeholder='+ Add task — try "essay due fri !high"' data-new-task-cat="${cat.id}"><div class="qa-hint"></div></div>`;
@@ -104,10 +99,10 @@ function renderTaskRow(t, catId, groupId, opts){
     </div>`;
 }
 function renderTaskList(tasks, catId, groupId){
-  const parents = tasks.filter(t=>!t.parentId);
+  const parents = tasks.filter(t=>!t.parentId && !taskDoneToday(t));
   if(!parents.length) return `<div class="empty" style="padding:8px 2px;">No tasks</div>`;
   return parents.map(t=>{
-    const kids = tasks.filter(x=>x.parentId===t.id);
+    const kids = tasks.filter(x=>x.parentId===t.id && !taskDoneToday(x));
     let html = renderTaskRow(t, catId, groupId, { childCount: kids.length, doneChildCount: kids.filter(k=>taskDoneToday(k)).length });
     if(kids.length && !t.collapsed) html += kids.map(k=> renderTaskRow(k, catId, groupId, { indent:true })).join("");
     html += `<div class="subtask-add-row" data-subtask-add-row="${t.id}" style="display:none;">
