@@ -10,6 +10,7 @@ let todoistLastSyncAt = 0;
 let todoistInFlight = false;
 let todoistDebounceTimer = null;
 let todoistMap = { projects: {}, sections: {}, tasks: {}, completed: {} };
+let todoistSyncProgress = { phase: "idle", done: 0, total: 0 };
 
 const COLOR_MAP = {
   "#b85c38":47, "#5f8a63":34, "#a87e23":44,
@@ -19,13 +20,13 @@ const COLOR_MAP = {
 function appToTodoistPriority(appPri){
   if(appPri===1) return 4;
   if(appPri===2) return 3;
-  if(appPri===3) return 1;
-  return 2;
+  if(appPri===3) return 2;
+  return 1;
 }
 function todoistToAppPriority(tdPri){
-  if(tdPri>=3) return 1;
-  if(tdPri===2) return 2;
-  if(tdPri===1) return 3;
+  if(tdPri===4) return 1;
+  if(tdPri===3) return 2;
+  if(tdPri===2) return 3;
   return 0;
 }
 
@@ -96,36 +97,110 @@ function loadTodoistMap(){
 async function todoistPush(){
   if(!todoistToken || !state.tasks.length) return;
 
-  for(const cat of state.tasks){
-    if(!cat.todoistId){
-      const p = await todoistFetch("/projects", {
-        method:"POST",
-        body:JSON.stringify({ name:cat.name, color:COLOR_MAP[cat.color]||34 })
-      });
-      cat.todoistId = p.id;
-      todoistMap.projects[p.id] = cat.id;
-    } else {
-      try{ await todoistFetch("/projects/"+cat.todoistId, { method:"POST", body:JSON.stringify({ name:cat.name, color:COLOR_MAP[cat.color]||34 }) }); }catch(e){}
-    }
-    for(const g of (cat.groups||[])){
-      if(!g.todoistSectionId){
-        const s = await todoistFetch("/sections", {
-          method:"POST",
-          body:JSON.stringify({ project_id:cat.todoistId, name:g.name })
+  todoistSyncProgress = { phase: "projects", done: 0, total: state.tasks.length };
+  renderTodoistPanel();
+
+  // Create projects in parallel
+  const projectCreates = state.tasks
+    .filter(cat => !cat.todoistId)
+    .map(cat => todoistFetch("/projects", {
+      method: "POST",
+      body: JSON.stringify({ name: cat.name, color: COLOR_MAP[cat.color] || 34 })
+    }).then(p => { cat.todoistId = p.id; todoistMap.projects[p.id] = cat.id; }));
+
+  const createdProjects = await Promise.all(projectCreates);
+  todoistSyncProgress.done = createdProjects.length;
+
+  // Update existing projects in parallel (only if name/color changed)
+  const projectUpdates = state.tasks
+    .filter(cat => cat.todoistId)
+    .map(cat => {
+      return todoistFetch("/projects/" + cat.todoistId)
+        .then(current => {
+          if (current.name !== cat.name || current.color !== (COLOR_MAP[cat.color] || 34)) {
+            return todoistFetch("/projects/" + cat.todoistId, {
+              method: "POST",
+              body: JSON.stringify({ name: cat.name, color: COLOR_MAP[cat.color] || 34 })
+            });
+          }
         });
-        g.todoistSectionId = s.id;
-        todoistMap.sections[s.id] = { catId:cat.id, groupId:g.id };
-      } else {
-        try{ await todoistFetch("/sections/"+g.todoistSectionId, { method:"POST", body:JSON.stringify({ name:g.name }) }); }catch(e){}
+    });
+
+  await Promise.all(projectUpdates);
+  todoistSyncProgress = { phase: "sections", done: 0, total: state.tasks.reduce((a, c) => a + (c.groups || []).length, 0) };
+  renderTodoistPanel();
+
+  // Create sections in parallel
+  const sectionCreates = [];
+  for (const cat of state.tasks) {
+    if (!cat.todoistId) continue;
+    for (const g of (cat.groups || [])) {
+      if (!g.todoistSectionId) {
+        sectionCreates.push(todoistFetch("/sections", {
+          method: "POST",
+          body: JSON.stringify({ project_id: cat.todoistId, name: g.name })
+        }).then(s => { g.todoistSectionId = s.id; todoistMap.sections[s.id] = { catId: cat.id, groupId: g.id }; }));
       }
     }
+  }
+  await Promise.all(sectionCreates);
+  todoistSyncProgress.done = sectionCreates.length;
 
-    for(const g of (cat.groups||[])){
-      for(const t of (g.tasks||[])) await todoistPushTask(t, cat, g.todoistSectionId);
+  // Update existing sections in parallel
+  const sectionUpdates = [];
+  for (const cat of state.tasks) {
+    if (!cat.todoistId) continue;
+    for (const g of (cat.groups || [])) {
+      if (g.todoistSectionId) {
+        sectionUpdates.push(
+          todoistFetch("/sections/" + g.todoistSectionId)
+            .then(current => {
+              if (current.name !== g.name) {
+                return todoistFetch("/sections/" + g.todoistSectionId, {
+                  method: "POST",
+                  body: JSON.stringify({ name: g.name })
+                });
+              }
+            })
+        );
+      }
     }
-    for(const t of (cat.tasks||[])) await todoistPushTask(t, cat, null);
+  }
+  await Promise.all(sectionUpdates);
+
+  // Push checklist tasks in parallel
+  const taskPromises = [];
+  for (const cat of state.tasks) {
+    if (!cat.todoistId) continue;
+    for (const g of (cat.groups || [])) {
+      for (const t of (g.tasks || [])) {
+        taskPromises.push(todoistPushTask(t, cat, g.todoistSectionId));
+      }
+    }
+    for (const t of (cat.tasks || [])) {
+      taskPromises.push(todoistPushTask(t, cat, null));
+    }
   }
 
+  // Push timetable task blocks
+  const timetableTaskPromises = await pushTimetableTasks();
+  taskPromises.push(...timetableTaskPromises);
+
+  let completed = 0;
+  const totalTasks = taskPromises.length;
+  todoistSyncProgress = { phase: "tasks", done: 0, total: totalTasks };
+  renderTodoistPanel();
+
+  for (const p of taskPromises) {
+    await p;
+    completed++;
+    if (completed % 5 === 0 || completed === totalTasks) {
+      todoistSyncProgress.done = completed;
+      renderTodoistPanel();
+    }
+  }
+
+  todoistSyncProgress = { phase: "done", done: 0, total: 0 };
   saveTodoistMap();
   save();
 }
@@ -154,8 +229,84 @@ async function todoistPushTask(t, cat, sectionId){
   }
 }
 
+async function pushTimetableTasks(){
+  if(!todoistToken) return [];
+  const timetableTasks = state.timetable.filter(b=> b.type==="task" && b.todoistId);
+  if(!timetableTasks.length) return [];
+  
+  // Get or create the Timetable project once
+  const projectId = await ensureTimetableProject();
+  
+  // Push all blocks in parallel
+  return timetableTasks.map(b => pushTimetableTaskBlock(b, projectId));
+}
+
+function ensureTimetableProject(){
+  // Find existing timetable project
+  const existing = state.tasks.find(c => c.name === "Timetable" && c.todoistId);
+  if(existing) return Promise.resolve(existing.todoistId);
+  
+  // Create new project
+  return todoistFetch("/projects", {
+    method: "POST",
+    body: JSON.stringify({ name: "Timetable", color: 34 })
+  }).then(p => {
+    const cat = { id:uid(), name:"Timetable", color:"#5f8a63", tasks:[], groups:[], todoistId:p.id };
+    state.tasks.push(cat);
+    todoistMap.projects[p.id] = cat.id;
+    return p.id;
+  });
+}
+
+function pushTimetableTaskBlock(block, projectId){
+  if(!block.todoistId){
+    const body = { 
+      content: block.title, 
+      project_id: projectId,
+      description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`
+    };
+    // Set due date to the start time on the block's day
+    const dueDate = getDueDateForBlock(block);
+    if(dueDate) body.due_date = dueDate;
+    
+    return todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) })
+      .then(td => {
+        block.todoistId = td.id;
+        todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
+      });
+  } else {
+    const body = { content: block.title };
+    const dueDate = getDueDateForBlock(block);
+    if(dueDate) body.due_date = dueDate;
+    body.description = `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`;
+    
+    return todoistFetch("/tasks/"+block.todoistId, { method:"POST", body:JSON.stringify(body) });
+  }
+}
+
+function getDueDateForBlock(block){
+  // Calculate the next occurrence date for this block's day
+  const today = new Date();
+  const todayDow = today.getDay(); // 0=Sun, 1=Mon...
+  const blockDow = block.day + 1; // 0=Mon -> 1, 4=Fri -> 5
+  
+  let daysUntil = blockDow - todayDow;
+  if(daysUntil < 0) daysUntil += 7;
+  if(daysUntil === 0){
+    // Today - check if time has passed
+    const nowMin = today.getHours()*60 + today.getMinutes();
+    const startMin = timeToMin(block.start);
+    if(nowMin > startMin) daysUntil = 7;
+  }
+  
+  const dueDate = new Date(today);
+  dueDate.setDate(today.getDate() + daysUntil);
+  return isoDate(dueDate);
+}
+
 async function todoistPushCompletions(){
   if(!todoistToken) return;
+  // Checklist tasks
   for(const cat of state.tasks){
     const allTasks = cat.tasks.concat((cat.groups||[]).reduce((a,g)=>a.concat(g.tasks||[]),[]));
     for(const t of allTasks){
@@ -173,6 +324,23 @@ async function todoistPushCompletions(){
           delete todoistMap.completed[key];
         }catch(e){}
       }
+    }
+  }
+  // Timetable task blocks
+  for(const block of state.timetable){
+    if(block.type!=="task" || !block.todoistId) continue;
+    const done = block.completed;
+    const key = block.todoistId+"_"+todayISO();
+    if(done && !todoistMap.completed[key]){
+      try{
+        await todoistFetch("/tasks/"+block.todoistId+"/close", { method:"POST" });
+        todoistMap.completed[key] = true;
+      }catch(e){}
+    } else if(!done && todoistMap.completed[key]){
+      try{
+        await todoistFetch("/tasks/"+block.todoistId+"/reopen", { method:"POST" });
+        delete todoistMap.completed[key];
+      }catch(e){}
     }
   }
   saveTodoistMap();
@@ -219,10 +387,26 @@ async function todoistPull(){
     }
   });
 
-  (tdTasks||[]).forEach(td=>{
+  // Pre-build lookup maps for O(1) access instead of O(n²)
+  const taskIdToLocal = new Map();
+  const catById = new Map(state.tasks.map(c => [c.id, c]));
+  for(const cat of state.tasks){
+    for(const t of cat.tasks) taskIdToLocal.set(t.id, { cat, task: t, group: null });
+    for(const g of cat.groups||[]){
+      for(const t of g.tasks||[]) taskIdToLocal.set(t.id, { cat, task: t, group: g });
+    }
+  }
+
+  // Separate timetable project tasks from checklist tasks
+  const timetableProjectId = state.tasks.find(c => c.name === "Timetable" && c.todoistId)?.todoistId;
+  const checklistTasks = (tdTasks||[]).filter(td => td.project_id !== timetableProjectId);
+  const timetableTasks = (tdTasks||[]).filter(td => td.project_id === timetableProjectId);
+
+  // Process checklist tasks (existing logic)
+  checklistTasks.forEach(td=>{
     const catAppId = todoistMap.projects[td.project_id];
     if(!catAppId) return;
-    const cat = state.tasks.find(c=>c.id===catAppId);
+    const cat = catById.get(catAppId);
     if(!cat) return;
 
     let targetArr = cat.tasks;
@@ -232,17 +416,16 @@ async function todoistPull(){
       if(g) targetArr = g.tasks;
     }
 
-    const allArr = cat.tasks.concat((cat.groups||[]).reduce((a,g)=>a.concat(g.tasks||[]),[]));
     const mapped = todoistMap.tasks[td.id];
-    const existing = mapped ? allArr.find(x=>x.id===mapped.taskId) : null;
+    const existing = mapped ? taskIdToLocal.get(mapped.taskId) : null;
 
     if(existing){
-      existing.title = td.content;
-      existing.due = (td.due && td.due.date) ? td.due.date : null;
-      existing.priority = todoistToAppPriority(td.priority||0);
-      existing.description = td.description || "";
-      existing.done = false;
-      existing.completedAt = null;
+      existing.task.title = td.content;
+      existing.task.due = (td.due && td.due.date) ? td.due.date : null;
+      existing.task.priority = todoistToAppPriority(td.priority||0);
+      existing.task.description = td.description || "";
+      existing.task.done = false;
+      existing.task.completedAt = null;
       changed = true;
     } else {
       const newTask = makeTask({
@@ -261,17 +444,50 @@ async function todoistPull(){
     }
   });
 
+  // Process timetable tasks
+  timetableTasks.forEach(td=>{
+    const mapped = todoistMap.tasks[td.id];
+    if(mapped && mapped.type === "timetable"){
+      // Existing timetable block
+      const block = state.timetable.find(b => b.id === mapped.blockId);
+      if(block){
+        block.title = td.content;
+        block.completed = false;
+        block.completedAt = null;
+        // Update due date from Todoist
+        if(td.due && td.due.date) block.due = td.due.date;
+        changed = true;
+      }
+    } else if(!mapped){
+      // New timetable task from Todoist - try to parse and create block
+      parseAndCreateTimetableBlock(td);
+      changed = true;
+    }
+  });
+
+  // Handle completed tasks (both checklist and timetable)
   (tdCompleted||[]).forEach(td=>{
     const mapped = todoistMap.tasks[td.id];
     if(!mapped) return;
-    const cat = state.tasks.find(c=>c.id===mapped.catId);
-    if(!cat) return;
-    const allArr = cat.tasks.concat((cat.groups||[]).reduce((a,g)=>a.concat(g.tasks||[]),[]));
-    const existing = allArr.find(x=>x.id===mapped.taskId);
-    if(existing && !existing.done){
-      existing.done = true;
-      existing.completedAt = todayISO();
-      changed = true;
+    
+    if(mapped.type === "timetable"){
+      // Timetable block completion
+      const block = state.timetable.find(b => b.id === mapped.blockId);
+      if(block && !block.completed){
+        block.completed = true;
+        block.completedAt = todayISO();
+        changed = true;
+      }
+    } else {
+      // Checklist task completion (existing logic)
+      const cat = catById.get(mapped.catId);
+      if(!cat) return;
+      const existing = taskIdToLocal.get(mapped.taskId);
+      if(existing && !existing.task.done){
+        existing.task.done = true;
+        existing.task.completedAt = todayISO();
+        changed = true;
+      }
     }
   });
 
@@ -282,6 +498,45 @@ async function todoistPull(){
   return changed;
 }
 
+function parseAndCreateTimetableBlock(td){
+  // Try to parse the description to extract day/time info
+  // Format: [Timetable Mon 09:00-10:00] description
+  const desc = td.description || "";
+  const match = desc.match(/\[Timetable\s+(Mon|Tue|Wed|Thu|Fri)\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\]/);
+  if(!match) return;
+  
+  const dayMap = {Mon:0, Tue:1, Wed:2, Thu:3, Fri:4, Sat:5, Sun:6};
+  const day = dayMap[match[1]];
+  if(day === undefined) return;
+  
+  const start = match[2];
+  const end = match[3];
+  
+  // Check if block already exists
+  const existing = state.timetable.find(b => 
+    b.day === day && b.start === start && b.end === end && b.title === td.content
+  );
+  if(existing){
+    existing.todoistId = td.id;
+    todoistMap.tasks[td.id] = { type: "timetable", blockId: existing.id };
+    return;
+  }
+  
+  // Create new block
+  const block = makeBlock({
+    type: "task",
+    title: td.content,
+    description: desc.replace(/\[Timetable[^\]]+\]\s*/, ""),
+    day,
+    start,
+    end,
+    todoistId: td.id,
+    completed: false
+  });
+  state.timetable.push(block);
+  todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
+}
+
 async function todoistSync(){
   if(!todoistToken || todoistInFlight) return;
   todoistInFlight = true;
@@ -289,8 +544,10 @@ async function todoistSync(){
   renderTodoistPanel();
   try{
     await todoistPush();
-    await todoistPushCompletions();
-    const pulled = await todoistPull();
+    const [, pulled] = await Promise.all([
+      todoistPushCompletions(),
+      todoistPull()
+    ]);
     todoistSyncStatus = "synced";
     todoistLastSyncAt = Date.now();
     save();
@@ -307,7 +564,7 @@ async function todoistSync(){
 function scheduleTodoistPush(){
   if(!todoistToken) return;
   clearTimeout(todoistDebounceTimer);
-  todoistDebounceTimer = setTimeout(()=> todoistSync(), 3000);
+  todoistDebounceTimer = setTimeout(()=> todoistSync(), 6000);
 }
 
 function initTodoistSync(){
@@ -339,9 +596,26 @@ function renderTodoistPanel(){
     : todoistSyncStatus==="error" ? '<span class="badge badge-danger">Error</span>'
     : todoistSyncStatus==="synced" ? '<span class="badge badge-success">Synced</span>'
     : '<span class="badge badge-muted">Connected</span>';
+  
+  let progressHtml = "";
+  if(todoistSyncStatus === "syncing" && todoistSyncProgress.total > 0){
+    const pct = Math.round((todoistSyncProgress.done / todoistSyncProgress.total) * 100);
+    progressHtml = `
+      <div style="margin-bottom:8px; font-size:11.5px; color:var(--text-dim);">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+          <span>${todoistSyncProgress.phase} (${todoistSyncProgress.done}/${todoistSyncProgress.total})</span>
+          <span>${pct}%</span>
+        </div>
+        <div style="height:4px; background:var(--border); border-radius:2px; overflow:hidden;">
+          <div style="height:100%; width:${pct}%; background:var(--accent); transition:width 0.2s;"></div>
+        </div>
+      </div>`;
+  }
+  
   el.innerHTML = `
     <div style="font-size:13px; margin-bottom:4px;">Connected to <b>Todoist</b> ${badge}</div>
     <div style="font-size:11.5px; color:var(--text-faint); margin-bottom:14px;">${todoistLastSyncAt ? "Last synced "+timeAgoShort(Date.now()-todoistLastSyncAt)+" ago" : "Syncing now…"}</div>
+    ${progressHtml}
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <button class="btn btn-primary" id="tdSyncNowBtn">Sync now</button>
       <button class="btn" id="tdDisconnectBtn">Disconnect</button>

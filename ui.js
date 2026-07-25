@@ -147,6 +147,7 @@ function openSelectPicker(anchor, options, currentValue, onPick){
     const dd = document.createElement("div");
     dd.className = "csel-dropdown";
     dd.style.visibility = "hidden";
+    dd.style.zIndex = "99999";
     dd.innerHTML = options.map(o=>`<button class="csel-option ${String(o.value)===String(currentValue)?"active":""}" data-v="${escapeHtml(String(o.value))}">${escapeHtml(o.label)}</button>`).join("");
     document.body.appendChild(dd);
     const ddw = Math.max(r.width, 170);

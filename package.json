@@ -1,0 +1,10 @@
+{
+  "name": "keystone",
+  "version": "1.0.0",
+  "description": "Personal study dashboard — timetable, pomodoro, checklist, marks and analytics.",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve .",
+    "start": "npx serve ."
+  }
+}

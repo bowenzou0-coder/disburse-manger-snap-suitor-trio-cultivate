@@ -1,4 +1,4 @@
-const CACHE_NAME = "keystone-v12";
+const CACHE_NAME = "keystone-v13";
 const CORE_ASSETS = [
   "./",
   "./index.html",

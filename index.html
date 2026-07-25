@@ -98,19 +98,48 @@
 
     <!-- TIMETABLE -->
     <section class="tab" id="tab-timetable">
-      <div class="topbar"><div><h1>Timetable</h1><div class="sub">Your weekly lesson periods</div></div>
+      <div class="topbar"><div><h1>Timetable</h1><div class="sub">Your weekly schedule</div></div>
         <div style="display:flex; gap:8px;">
+          <button class="btn" id="ttTemplatesBtn">Templates</button>
           <button class="btn" id="ttImportBtn">Import</button>
-          <button class="btn btn-primary" id="ttAddBtn">+ Add period</button>
+          <button class="btn" id="ttExportBtn">Export</button>
+          <button class="btn btn-primary" id="ttAddBtn">+ Add block</button>
         </div>
       </div>
-      <div class="tt-toolbar"></div>
+      <div class="tt-toolbar">
+        <div class="tt-week-nav">
+          <button class="btn btn-sm" id="ttPrevWeek">‹</button>
+          <span id="ttWeekLabel" style="display:flex; align-items:center; min-width:160px; justify-content:center; font-weight:500;"></span>
+          <button class="btn btn-sm" id="ttNextWeek">›</button>
+        </div>
+        <div class="tt-type-filter" id="ttTypeFilter">
+          <button class="btn btn-sm active" data-tt-filter="all">All</button>
+          <button class="btn btn-sm" data-tt-filter="event">Events</button>
+          <button class="btn btn-sm" data-tt-filter="task">Tasks</button>
+          <button class="btn btn-sm" data-tt-filter="study">Study</button>
+        </div>
+      </div>
+      <div class="upnext-card" id="ttUpNextCard" style="display:none;">
+        <div class="upnext-head">
+          <span class="upnext-label" id="ttUpNextLabel">Up next</span>
+          <span class="upnext-timer" id="ttUpNextTimer"></span>
+        </div>
+        <div class="upnext-name" id="ttUpNextName"></div>
+        <div class="upnext-meta" id="ttUpNextMeta"></div>
+        <div class="upnext-track"><div class="upnext-fill" id="ttUpNextFill"></div></div>
+      </div>
       <div class="tt-wrap"><div id="ttGrid"></div></div>
       <div class="tt-legend" id="ttLegend"></div>
       <div class="tt-mobile" id="ttMobileWrap">
         <div class="filter-tabs" id="ttDayTabs"></div>
+        <div class="tt-type-filter-mobile" id="ttTypeFilterMobile">
+          <button class="btn btn-sm active" data-tt-filter="all">All</button>
+          <button class="btn btn-sm" data-tt-filter="event">Events</button>
+          <button class="btn btn-sm" data-tt-filter="task">Tasks</button>
+          <button class="btn btn-sm" data-tt-filter="study">Study</button>
+        </div>
         <div id="ttDayList"></div>
-        <button class="btn" id="ttMobileAddBtn" style="width:100%; margin-top:6px;">+ Add period</button>
+        <button class="btn" id="ttMobileAddBtn" style="width:100%; margin-top:6px;">+ Add block</button>
       </div>
     </section>
 
@@ -251,6 +280,7 @@
 <script src="analytics.js"></script>
 <script src="todoist-sync.js"></script>
 <script src="settings.js"></script>
+<script src="dragdrop.js"></script>
 <script>
 (function(){
 "use strict";
@@ -272,6 +302,7 @@ function init(){
   setInterval(()=>{
     if(document.visibilityState!=="visible") return;
     if(document.getElementById("tab-overview").classList.contains("active")) renderUpNext();
+    if(document.getElementById("tab-timetable").classList.contains("active")) renderTimetableUpNext();
   }, 1000);
 }
 init();

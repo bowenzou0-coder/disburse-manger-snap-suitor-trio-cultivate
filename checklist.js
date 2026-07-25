@@ -85,18 +85,24 @@ function renderTaskRow(t, catId, groupId, opts){
   const overdue = t.due && !done && t.due<todayISO();
   const notToday = t.repeat && !overdue && !taskRelevantToday(t);
   const hasKids = opts.childCount>0;
-  return `<div class="task-row ${opts.indent?'subtask-row':''}" ${notToday?'style="opacity:.5;"':''}>
+  const hasDesc = !!t.description;
+  const descOpen = !!t.descExpanded;
+  let html = `<div class="task-row ${opts.indent?'subtask-row':''}" ${notToday?'style="opacity:.5;"':''}>
       ${hasKids?`<button class="iconbtn" data-toggle-collapse="${catId}:${groupId||''}:${t.id}" style="flex-shrink:0; padding:2px;">${icon(t.collapsed?'<path d="M9 18l6-6-6-6"/>':'<path d="M6 9l6 6 6-6"/>',12)}</button>`:(opts.indent?'':'<span style="width:20px; flex-shrink:0;"></span>')}
       <div class="task-check ${done?'done':''}" data-toggle="${catId}:${groupId||''}:${t.id}" title="${notToday?'Not scheduled today — click to mark it anyway':''}">${done?icon('<path d="M20 6L9 17l-5-5"/>',11):''}</div>
       ${t.priority?`<span class="pri-dot" style="background:${priColors[t.priority]}"></span>`:''}
       <span class="task-title ${done?'done':''}" data-edit-task="${catId}:${groupId||''}:${t.id}">${escapeHtml(t.title)}</span>
       ${hasKids?`<span class="task-due" style="background:var(--surface-2); color:var(--text-dim);">${opts.doneChildCount}/${opts.childCount}</span>`:''}
       ${t.repeat?`<span class="iconbtn" style="cursor:default; color:var(--text-faint);" title="${escapeHtml(taskRepeatLabel(t))}">${icon('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',13)}</span>`:''}
-      ${t.description?`<span class="iconbtn" style="cursor:default; color:var(--text-faint);" title="${escapeHtml(t.description)}">${icon('<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',13)}</span>`:''}
+      ${hasDesc?`<button class="iconbtn" data-toggle-desc="${catId}:${groupId||''}:${t.id}" style="color:${descOpen?'var(--accent)':'var(--text-faint)'};">${icon('<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',13)}</button>`:''}
       ${(t.due && (!t.repeat || overdue))?`<span class="task-due" style="background:${overdue?'var(--danger-soft)':'var(--surface-2)'}; color:${overdue?'var(--danger)':'var(--text-dim)'}">${t.due}</span>`:''}
       ${!opts.indent?`<button class="iconbtn" data-add-subtask="${t.id}" title="Add sub-task">${icon('<path d="M12 5v14"/><path d="M5 12h14"/>',13)}</button>`:''}
       <button class="iconbtn" data-del-task="${catId}:${groupId||''}:${t.id}">${icon('<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',13)}</button>
     </div>`;
+  if(hasDesc && descOpen){
+    html += `<div class="task-desc-block" style="padding:0 0 0 ${opts.indent?'44':'40'}px; font-size:12.5px; color:var(--text-dim); white-space:pre-wrap; line-height:1.45;">${escapeHtml(t.description)}</div>`;
+  }
+  return html;
 }
 function renderTaskList(tasks, catId, groupId){
   const parents = tasks.filter(t=>!t.parentId && !taskDoneToday(t));
@@ -136,6 +142,12 @@ function wireTaskEvents(root){
     const arr = findTaskArr(catId, groupId||null);
     const t = arr.find(x=>x.id===taskId); if(!t) return;
     t.collapsed = !t.collapsed; save(); renderChecklist();
+  }));
+  root.querySelectorAll("[data-toggle-desc]").forEach(el=> el.addEventListener("click", ()=>{
+    const [catId, groupId, taskId] = el.dataset.toggleDesc.split(":");
+    const allArr = findTaskArr(catId, groupId||null) || [];
+    const t = allArr.find(x=>x.id===taskId); if(!t) return;
+    t.descExpanded = !t.descExpanded; save(); renderChecklist();
   }));
   root.querySelectorAll("[data-add-subtask]").forEach(el=> el.addEventListener("click", ()=>{
     const row = root.querySelector(`[data-subtask-add-row="${el.dataset.addSubtask}"]`);
@@ -197,7 +209,7 @@ function openTaskEditModal(catId, groupId, taskId, anchor){
     <div class="modal-actions"><button class="btn" id="tfCancel">Cancel</button><button class="btn btn-primary" id="tfSave">Save</button></div>`;
   openPopover(anchor, "Edit task", body, root=>{
     initSelect(root.querySelector("#tfPriority"), [
-      {value:0,label:"None"}, {value:1,label:"P1 — High"}, {value:2,label:"P2 — Medium"}, {value:3,label:"P3 — Low"}
+      {value:0,label:"P4 — None"}, {value:1,label:"P1 — High"}, {value:2,label:"P2 — Medium"}, {value:3,label:"P3 — Low"}
     ], t.priority);
     const repeatDaysWrap = root.querySelector("#tfRepeatDays");
     let pickedDays = new Set(t.repeatDays||[]);

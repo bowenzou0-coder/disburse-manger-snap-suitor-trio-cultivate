@@ -2,7 +2,7 @@
 
 const KEY = "studyDashboard.v1";
 const PALETTE = ["#b85c38","#5f8a63","#a87e23","#5c7a99","#7e5a75","#3f7e74","#a8465a"];
-const DAYS = ["Mon","Tue","Wed","Thu","Fri"];
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const TABS = [
   {id:"overview", label:"Overview", icon:'<path d="M3 11l9-7 9 7"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/>'},
   {id:"timetable", label:"Timetable", icon:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18"/><path d="M8 2v4"/><path d="M16 2v4"/>'},
@@ -17,7 +17,17 @@ function makeTask(overrides){
   return Object.assign({
     id:uid(), title:"", done:false, due:null, priority:0, completedAt:null,
     repeat:null, repeatDays:[], completedDates:[], description:"",
-    parentId:null, collapsed:false, todoistId:null
+    parentId:null, collapsed:false, todoistId:null, descExpanded:false
+  }, overrides);
+}
+function makeBlock(overrides){
+  return Object.assign({
+    id:uid(), type:"event", title:"", description:"",
+    day:0, start:"09:00", end:"10:00",
+    color:null, subjectId:null,
+    recurring:true, templateId:null,
+    todoistId:null, completed:false, completedAt:null,
+    obsidianRef:null, generated:false, studyTopics:[], studyProgress:0, createdAt:todayISO()
   }, overrides);
 }
 function seedSubjects(){
@@ -28,12 +38,14 @@ function defaultState(){
   return {
     subjects: seedSubjects(),
     timetable: [],
+    templates: [],
     tasks: [],
     marks: [],
     sessions: [],
     notes: "",
     goals: {},
     benchmarks: {},
+    weekOffset: 0,
     settings: { pomodoroWork:25, pomodoroShort:5, pomodoroLong:15, longBreakInterval:4, theme:"light", lastTab:"overview" }
   };
 }
@@ -57,6 +69,13 @@ function loadState(){
     const d = defaultState();
     const merged = Object.assign({}, d, parsed, { settings: Object.assign({}, d.settings, parsed.settings||{}) });
     merged.tasks = normalizeTasksSlice(merged.tasks);
+    if(!merged.templates) merged.templates = [];
+    if(merged.timetable.length && merged.timetable[0] && merged.timetable[0].subjectId !== undefined && !merged.timetable[0].type){
+      merged.timetable = merged.timetable.map(p => makeBlock({
+        id: p.id, type:"event", title: p.label||"", day: p.day,
+        start: p.start, end: p.end, subjectId: p.subjectId, recurring:true, createdAt: todayISO()
+      }));
+    }
     return merged;
   }catch(e){ return defaultState(); }
 }

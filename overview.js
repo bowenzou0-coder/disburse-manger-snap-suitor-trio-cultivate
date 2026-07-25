@@ -33,9 +33,9 @@ function renderUpNext(){
   document.getElementById("upNextLabel").textContent = label;
   document.getElementById("upNextTimer").textContent = (current?"Ends in ":"Starts in ")+timeStr;
   document.getElementById("upNextTimer").style.color = color;
-  document.getElementById("upNextName").textContent = subj?subj.name:(period.label||"Untitled");
+  document.getElementById("upNextName").textContent = blockName(period);
   document.getElementById("upNextName").style.color = color;
-  document.getElementById("upNextMeta").textContent = [period.room, period.teacher].filter(Boolean).join(" · ") || "\u00a0";
+  document.getElementById("upNextMeta").textContent = period.description ? escapeHtml(period.description.slice(0,60)) : "\u00a0";
   document.getElementById("upNextFill").style.width = fill.toFixed(1)+"%";
   document.getElementById("upNextFill").style.background = color;
 }
@@ -63,12 +63,12 @@ function renderOverview(){
     ovToday.innerHTML = todays.map(p=>{
       const subj = subjectById(p.subjectId);
       const color = subj?subj.color:"#a1a1aa";
-      const name = subj?subj.name:(p.label||"Untitled");
+      const name = escapeHtml(blockName(p));
       const active = nowMin>=timeToMin(p.start) && nowMin<timeToMin(p.end);
       return `<div class="period-row">
         <div class="period-time">${minToTimeLabel(timeToMin(p.start))}</div>
         <div class="period-bar" style="background:${color}"></div>
-        <div><div class="period-name">${escapeHtml(name)}</div><div class="period-meta">${[p.room,p.teacher].filter(Boolean).map(escapeHtml).join(" · ")}</div></div>
+        <div><div class="period-name">${name}</div><div class="period-meta">${p.description?escapeHtml(p.description.slice(0,40)):''}</div></div>
         ${active?'<span class="now-tag">NOW</span>':''}
       </div>`;
     }).join("");
