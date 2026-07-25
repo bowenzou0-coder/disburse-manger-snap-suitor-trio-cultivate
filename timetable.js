@@ -131,7 +131,6 @@ function renderTimetable(){
   }
   renderTimetableMobile();
   renderTimetableUpNext();
-  if (typeof initDragDrop === "function") initDragDrop();
 }
 
 function scrollToNow(){
