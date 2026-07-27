@@ -94,6 +94,7 @@ async function todoistFetch(path, opts, attempt){
     throw new Error("Network error — check your connection or disable ad blockers");
   }
   if(res.status===401) throw new Error("Invalid Todoist API token");
+  if(res.status===404) throw new Error("NOT_FOUND");
   if(res.status===429) throw new Error("Todoist rate limit — try again later");
   if(!res.ok) throw new Error("Todoist API "+res.status);
   const ct = res.headers.get("content-type")||"";
@@ -131,16 +132,25 @@ async function todoistPush(){
   // Update existing projects in parallel (only if name/color changed)
   const projectUpdates = state.tasks
     .filter(cat => cat.todoistId)
-    .map(cat => {
-      return todoistFetch("/projects/" + cat.todoistId)
-        .then(current => {
-          if (current.name !== cat.name || current.color !== (COLOR_MAP[cat.color] || 34)) {
-            return todoistFetch("/projects/" + cat.todoistId, {
-              method: "POST",
-              body: JSON.stringify({ name: cat.name, color: COLOR_MAP[cat.color] || 34 })
-            });
-          }
-        });
+    .map(async (cat) => {
+      try {
+        const current = await todoistFetch("/projects/" + cat.todoistId);
+        if (current && (current.name !== cat.name || current.color !== (COLOR_MAP[cat.color] || 34))) {
+          await todoistFetch("/projects/" + cat.todoistId, {
+            method: "POST",
+            body: JSON.stringify({ name: cat.name, color: COLOR_MAP[cat.color] || 34 })
+          });
+        }
+      } catch (e) {
+        if (e.message === "NOT_FOUND") {
+          console.warn(`[Todoist Sync] Project ID ${cat.todoistId} not found. Clearing ID to recreate.`);
+          const oldId = cat.todoistId;
+          cat.todoistId = null;
+          delete todoistMap.projects[oldId];
+        } else {
+          throw e;
+        }
+      }
     });
 
   await Promise.all(projectUpdates);
@@ -170,15 +180,26 @@ async function todoistPush(){
     for (const g of (cat.groups || [])) {
       if (g.todoistSectionId) {
         sectionUpdates.push(
-          todoistFetch("/sections/" + g.todoistSectionId)
-            .then(current => {
-              if (current.name !== g.name) {
-                return todoistFetch("/sections/" + g.todoistSectionId, {
+          (async () => {
+            try {
+              const current = await todoistFetch("/sections/" + g.todoistSectionId);
+              if (current && current.name !== g.name) {
+                await todoistFetch("/sections/" + g.todoistSectionId, {
                   method: "POST",
                   body: JSON.stringify({ name: g.name })
                 });
               }
-            })
+            } catch (e) {
+              if (e.message === "NOT_FOUND") {
+                console.warn(`[Todoist Sync] Section ID ${g.todoistSectionId} not found. Clearing ID.`);
+                const oldId = g.todoistSectionId;
+                g.todoistSectionId = null;
+                delete todoistMap.sections[oldId];
+              } else {
+                throw e;
+              }
+            }
+          })()
         );
       }
     }
@@ -238,11 +259,24 @@ async function todoistPushTask(t, cat, sectionId){
     t.todoistId = td.id;
     todoistMap.tasks[td.id] = { catId:cat.id, taskId:t.id };
   } else {
-    const body = { content:t.title };
-    if(t.priority) body.priority = appToTodoistPriority(t.priority);
-    body.due_date = t.due || null;
-    body.description = t.description || "";
-    await todoistFetch("/tasks/"+t.todoistId, { method:"POST", body:JSON.stringify(body) });
+    try {
+      const body = { content:t.title };
+      if(t.priority) body.priority = appToTodoistPriority(t.priority);
+      body.due_date = t.due || null;
+      body.description = t.description || "";
+      await todoistFetch("/tasks/"+t.todoistId, { method:"POST", body:JSON.stringify(body) });
+    } catch (e) {
+      if (e.message === "NOT_FOUND") {
+        console.warn(`[Todoist Sync] Task ID ${t.todoistId} not found. Clearing ID to recreate.`);
+        const oldId = t.todoistId;
+        t.todoistId = null;
+        delete todoistMap.tasks[oldId];
+        // Recreate the task
+        await todoistPushTask(t, cat, sectionId);
+      } else {
+        throw e;
+      }
+    }
   }
 }
 
@@ -275,7 +309,7 @@ function ensureTimetableProject(){
   });
 }
 
-function pushTimetableTaskBlock(block, projectId){
+async function pushTimetableTaskBlock(block, projectId){
   if(!block.todoistId){
     const body = { 
       content: block.title, 
@@ -286,18 +320,29 @@ function pushTimetableTaskBlock(block, projectId){
     const dueDate = getDueDateForBlock(block);
     if(dueDate) body.due_date = dueDate;
     
-    return todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) })
-      .then(td => {
-        block.todoistId = td.id;
-        todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
-      });
+    const td = await todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) });
+    block.todoistId = td.id;
+    todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
   } else {
-    const body = { content: block.title };
-    const dueDate = getDueDateForBlock(block);
-    if(dueDate) body.due_date = dueDate;
-    body.description = `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`;
-    
-    return todoistFetch("/tasks/"+block.todoistId, { method:"POST", body:JSON.stringify(body) });
+    try {
+      const body = { content: block.title };
+      const dueDate = getDueDateForBlock(block);
+      if(dueDate) body.due_date = dueDate;
+      body.description = `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`;
+      
+      await todoistFetch("/tasks/"+block.todoistId, { method:"POST", body:JSON.stringify(body) });
+    } catch (e) {
+      if (e.message === "NOT_FOUND") {
+        console.warn(`[Todoist Sync] Timetable Task ID ${block.todoistId} not found. Clearing ID to recreate.`);
+        const oldId = block.todoistId;
+        block.todoistId = null;
+        delete todoistMap.tasks[oldId];
+        // Recreate the task
+        await pushTimetableTaskBlock(block, projectId);
+      } else {
+        throw e;
+      }
+    }
   }
 }
 
