@@ -21,6 +21,7 @@ let sliceRevs = {};
 try{ sliceRevs = JSON.parse(localStorage.getItem(SYNC_REVS_KEY)||"{}"); }catch(e){ sliceRevs = {}; }
 let lastPushedSnapshot = {};
 try{ lastPushedSnapshot = JSON.parse(localStorage.getItem(SYNC_SNAPSHOT_KEY)||"{}"); }catch(e){ lastPushedSnapshot = {}; }
+let isInitialSignInSync = false;
 function saveSliceRevs(){ localStorage.setItem(SYNC_REVS_KEY, JSON.stringify(sliceRevs)); }
 function saveSnapshot(){ localStorage.setItem(SYNC_SNAPSHOT_KEY, JSON.stringify(lastPushedSnapshot)); }
 
@@ -144,6 +145,53 @@ function mergeSlicePayload(slice, remotePayload, localPayload){
   if(slice==="tasks") return mergeTasksSlice(remotePayload, localPayload);
   return mergeFlatCollection(remotePayload, localPayload);
 }
+function hardOverrideSlice(slice, remotePayload, localPayload){
+  if(slice === "tasks"){
+    const localTodoistMap = new Map();
+    const extract = (arr) => {
+      (arr || []).forEach(item => {
+        if(item.todoistId) localTodoistMap.set(item.id, item.todoistId);
+        if(item.groups) {
+          item.groups.forEach(g => {
+            if(g.todoistSectionId) localTodoistMap.set(g.id, g.todoistSectionId);
+            if(g.tasks) extract(g.tasks);
+          });
+        }
+        if(item.tasks) extract(item.tasks);
+      });
+    };
+    extract(localPayload.items);
+    
+    const apply = (arr) => {
+      (arr || []).forEach(item => {
+        if(localTodoistMap.has(item.id)) item.todoistId = localTodoistMap.get(item.id);
+        if(item.groups) {
+          item.groups.forEach(g => {
+            if(localTodoistMap.has(g.id)) g.todoistSectionId = localTodoistMap.get(g.id);
+            if(g.tasks) apply(g.tasks);
+          });
+        }
+        if(item.tasks) apply(item.tasks);
+      });
+    };
+    apply(remotePayload.items);
+    return remotePayload;
+  }
+  
+  if(slice === "timetable"){
+    const localTodoistMap = new Map();
+    (localPayload.items || []).forEach(b => {
+      if(b.todoistId) localTodoistMap.set(b.id, b.todoistId);
+    });
+    (remotePayload.items || []).forEach(b => {
+      if(localTodoistMap.has(b.id)) b.todoistId = localTodoistMap.get(b.id);
+    });
+    return remotePayload;
+  }
+  
+  return remotePayload;
+}
+
 function applySlicePayload(slice, payload){
   if(SYNC_COLLECTION_SLICES.includes(slice)) state[slice] = payload.items;
   else if(slice==="settings") state.settings = Object.assign({}, payload.value, { lastTab: state.settings.lastTab });
@@ -168,6 +216,7 @@ async function initSync(){
         });
       }
     } else if(event==="SIGNED_IN" || (event==="INITIAL_SESSION" && session)){
+      isInitialSignInSync = true;
       syncNow();
     } else if(event==="SIGNED_OUT"){
       syncSession=null; syncStatus="idle";
@@ -196,9 +245,11 @@ async function syncNow(manual){
     SYNC_ALL_SLICES.forEach(slice=>{
       const remote = remoteBySlice[slice];
       if(!remote) return;
-      if(sliceRevs[slice] === remote.rev) return;
+      if(sliceRevs[slice] === remote.rev && !isInitialSignInSync) return;
       let merged;
-      if(SYNC_COLLECTION_SLICES.includes(slice)){
+      if(isInitialSignInSync && SYNC_COLLECTION_SLICES.includes(slice)){
+        merged = hardOverrideSlice(slice, remote.data, localPayloads[slice]);
+      } else if(SYNC_COLLECTION_SLICES.includes(slice)){
         merged = mergeSlicePayload(slice, remote.data, localPayloads[slice]);
       } else {
         const hasSyncedBefore = Object.prototype.hasOwnProperty.call(lastPushedSnapshot, slice);
@@ -235,6 +286,7 @@ async function syncNow(manual){
     if(manual || !syncErrorToasted){ toast("Sync error: "+msg); syncErrorToasted = true; }
   }finally{
     syncInFlight = false;
+    isInitialSignInSync = false;
     if(document.getElementById("syncPanel")) renderSyncPanel();
   }
 }
