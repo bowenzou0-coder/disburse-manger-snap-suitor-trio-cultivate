@@ -142,8 +142,9 @@ async function todoistPush(){
           });
         }
       } catch (e) {
-        if (e.message === "NOT_FOUND") {
-          console.warn(`[Todoist Sync] Project ID ${cat.todoistId} not found. Clearing ID to recreate.`);
+        // Handle both explicit 404 AND CORS-blocked 404s (which appear as "Network error")
+        if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
+          console.warn(`[Todoist Sync] Project ID ${cat.todoistId} missing or blocked. Clearing ID to recreate.`);
           const oldId = cat.todoistId;
           cat.todoistId = null;
           delete todoistMap.projects[oldId];
@@ -190,8 +191,8 @@ async function todoistPush(){
                 });
               }
             } catch (e) {
-              if (e.message === "NOT_FOUND") {
-                console.warn(`[Todoist Sync] Section ID ${g.todoistSectionId} not found. Clearing ID.`);
+              if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
+                console.warn(`[Todoist Sync] Section ID ${g.todoistSectionId} missing or blocked. Clearing ID.`);
                 const oldId = g.todoistSectionId;
                 g.todoistSectionId = null;
                 delete todoistMap.sections[oldId];
@@ -266,8 +267,8 @@ async function todoistPushTask(t, cat, sectionId){
       body.description = t.description || "";
       await todoistFetch("/tasks/"+t.todoistId, { method:"POST", body:JSON.stringify(body) });
     } catch (e) {
-      if (e.message === "NOT_FOUND") {
-        console.warn(`[Todoist Sync] Task ID ${t.todoistId} not found. Clearing ID to recreate.`);
+      if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
+        console.warn(`[Todoist Sync] Task ID ${t.todoistId} missing or blocked. Clearing ID to recreate.`);
         const oldId = t.todoistId;
         t.todoistId = null;
         delete todoistMap.tasks[oldId];
@@ -680,12 +681,37 @@ function renderTodoistPanel(){
     ${progressHtml}
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <button class="btn btn-primary" id="tdSyncNowBtn">Sync now</button>
+      <button class="btn btn-danger" id="tdResetSyncBtn">Reset Todoist Sync</button>
       <button class="btn" id="tdDisconnectBtn">Disconnect</button>
-    </div>`;
+    </div>
+    <p style="font-size:11px; color:var(--text-faint); margin-top:8px;">Reset clears all Todoist ID links locally and forces a fresh recreate on next sync. Your tasks & data are preserved.</p>`;
   el.querySelector("#tdSyncNowBtn").addEventListener("click", async ()=>{
     const btn = el.querySelector("#tdSyncNowBtn"); btn.textContent="Syncing…"; btn.disabled=true;
     await todoistSync();
     btn.textContent="Sync now"; btn.disabled=false;
+  });
+  el.querySelector("#tdResetSyncBtn").addEventListener("click", ()=>{
+    if(confirm("Reset all Todoist sync links? This will clear all todoistId references and recreate everything fresh on the next sync. Your local tasks, subjects, and timetable data will NOT be deleted.")){
+      // Clear all todoistId refs from state
+      for(const cat of state.tasks){
+        delete cat.todoistId;
+        for(const g of (cat.groups || [])){
+          delete g.todoistSectionId;
+          for(const t of (g.items || [])) delete t.todoistId;
+        }
+      }
+      // Clear timetable task todoistIds
+      for(const slot of (state.timetable || [])){
+        for(const t of (slot.tasks || [])) delete t.todoistId;
+      }
+      // Wipe the map
+      todoistMap = {projects:{},sections:{},tasks:{},completed:{}};
+      saveTodoistMap();
+      save();
+      todoistSyncStatus = "idle";
+      toast("Todoist sync reset. Press 'Sync now' to recreate.");
+      renderTodoistPanel();
+    }
   });
   el.querySelector("#tdDisconnectBtn").addEventListener("click", ()=>{
     if(confirm("Disconnect from Todoist? Your local tasks won't be deleted.")){
