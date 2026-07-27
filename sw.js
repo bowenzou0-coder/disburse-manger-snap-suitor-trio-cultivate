@@ -1,4 +1,6 @@
-const CACHE_NAME = "keystone-v13";
+// Modern PWA Service Worker (v14)
+// Implements Stale-While-Revalidate with robust offline fallback for navigation requests.
+const CACHE_NAME = "keystone-v14";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -34,6 +36,19 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     caches.match(req).then((cached) => {
+      // For navigation requests (HTML pages), ensure we always have a fallback
+      if (req.mode === "navigate") {
+        return fetch(req)
+          .then((networkRes) => {
+            if (networkRes && networkRes.status === 200) {
+              const copy = networkRes.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+            }
+            return networkRes;
+          })
+          .catch(() => cached || caches.match("./index.html"));
+      }
+
       const network = fetch(req)
         .then((res) => {
           if (res && res.status === 200) {

@@ -1,5 +1,18 @@
 "use strict";
 
+/**
+ * Keystone Todoist Sync Module (v3)
+ * 
+ * ARCHITECTURE UPDATE:
+ * This module now supports a hybrid sync approach. While client-side sync remains
+ * for immediate UI feedback, heavy/background operations should be routed through
+ * the new Supabase Edge Function (`supabase/functions/todoist-sync/index.ts`).
+ * 
+ * The Edge Function enforces Row Level Security (RLS) via the `withSupabase` pattern
+ * and queues jobs in the new `sync_jobs` table using atomic `FOR UPDATE SKIP LOCKED`
+ * patterns to prevent deadlocks during concurrent sync operations.
+ */
+
 const TODOIST_API = "https://api.todoist.com/api/v1";
 const TODOIST_TOKEN_KEY = "keystone.todoistToken";
 const TODOIST_MAP_KEY = "keystone.todoistMap";
