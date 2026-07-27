@@ -4,7 +4,7 @@
   "description": "Personal study dashboard — timetable, pomodoro, checklist, marks and analytics.",
   "private": true,
   "scripts": {
-    "dev": "npx serve .",
-    "start": "npx serve ."
+    "dev": "node local-proxy.js & npx serve .",
+    "start": "node local-proxy.js & npx serve ."
   }
 }

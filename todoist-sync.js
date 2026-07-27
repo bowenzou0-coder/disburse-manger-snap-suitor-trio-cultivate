@@ -14,6 +14,10 @@
  */
 
 const TODOIST_API = "https://api.todoist.com/api/v1";
+// Use local proxy in development to bypass browser CORS restrictions
+const IS_LOCALHOST = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const API_BASE = IS_LOCALHOST ? "http://localhost:3001" : TODOIST_API;
+
 const TODOIST_TOKEN_KEY = "keystone.todoistToken";
 const TODOIST_MAP_KEY = "keystone.todoistMap";
 
@@ -77,7 +81,7 @@ async function todoistFetch(path, opts, attempt){
   if(method !== "GET") headers["Content-Type"] = "application/json";
   let res;
   try{
-    res = await fetch(TODOIST_API + path, {
+    res = await fetch(API_BASE + path, {
       method,
       headers,
       body: opts.body || undefined
