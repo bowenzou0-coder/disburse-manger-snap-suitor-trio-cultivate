@@ -1,35 +1,37 @@
 "use strict";
 
 /**
- * Keystone Todoist Sync Module (v3)
- * 
- * ARCHITECTURE UPDATE:
- * This module now supports a hybrid sync approach. While client-side sync remains
- * for immediate UI feedback, heavy/background operations should be routed through
- * the new Supabase Edge Function (`supabase/functions/todoist-sync/index.ts`).
- * 
- * The Edge Function enforces Row Level Security (RLS) via the `withSupabase` pattern
- * and queues jobs in the new `sync_jobs` table using atomic `FOR UPDATE SKIP LOCKED`
- * patterns to prevent deadlocks during concurrent sync operations.
+ * Keystone Todoist Sync Module (v4)
+ *
+ * SYNC MODES:
+ * - "keystone": Push local data to Todoist. Pull only imports NEW items (no local match).
+ *                Never overwrites existing local data. Keystone is source of truth.
+ * - "todoist": Pull overwrites everything. Todoist is source of truth.
+ * - "bidirectional": Full two-way sync with conflict dialogs on name mismatches.
+ *
+ * SYNC ORDER: Pull → Push → Completions
+ * Pulling first ensures the todoistMap is populated before push tries to create anything,
+ * preventing duplicate project/task creation.
  */
 
-const TODOIST_API = "https://api.todoist.com/api/v1";
-// Use local proxy in development to bypass browser CORS restrictions
+const TODOIST_SYNC_API = "https://api.todoist.com/api/v1";
 const IS_LOCALHOST = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const API_BASE = IS_LOCALHOST ? "http://localhost:3001" : TODOIST_API;
+const API_BASE = IS_LOCALHOST ? "http://localhost:3001" : TODOIST_SYNC_API;
 
 const TODOIST_TOKEN_KEY = "keystone.todoistToken";
 const TODOIST_MAP_KEY = "keystone.todoistMap";
+const TODOIST_SYNC_MODE_KEY = "keystone.todoistSyncMode";
 
-let todoistToken = localStorage.getItem(TODOIST_TOKEN_KEY) || "";
-let todoistSyncStatus = "idle";
-let todoistLastSyncAt = 0;
-let todoistInFlight = false;
-let todoistDebounceTimer = null;
-let todoistMap = { projects: {}, sections: {}, tasks: {}, completed: {} };
-let todoistSyncProgress = { phase: "idle", done: 0, total: 0 };
+var todoistToken = localStorage.getItem(TODOIST_TOKEN_KEY) || "";
+var todoistSyncMode = localStorage.getItem(TODOIST_SYNC_MODE_KEY) || "keystone";
+var todoistSyncStatus = "idle";
+var todoistLastSyncAt = 0;
+var todoistInFlight = false;
+var todoistDebounceTimer = null;
+var todoistMap = { projects: {}, sections: {}, tasks: {}, completed: {} };
+var todoistSyncProgress = { phase: "idle", done: 0, total: 0 };
 
-const COLOR_MAP = {
+var COLOR_MAP = {
   "#b85c38":47, "#5f8a63":34, "#a87e23":44,
   "#5c7a99":45, "#7e5a75":33, "#3f7e74":49, "#a8465a":50
 };
@@ -112,13 +114,14 @@ function loadTodoistMap(){
   }catch(e){ todoistMap={projects:{},sections:{},tasks:{},completed:{}}; }
 }
 
+// ─── PUSH ────────────────────────────────────────────────────────────────────
+
 async function todoistPush(){
   if(!todoistToken || !state.tasks.length) return;
 
   todoistSyncProgress = { phase: "projects", done: 0, total: state.tasks.length };
   renderTodoistPanel();
 
-  // Create projects in parallel
   const projectCreates = state.tasks
     .filter(cat => !cat.todoistId)
     .map(cat => todoistFetch("/projects", {
@@ -129,7 +132,6 @@ async function todoistPush(){
   const createdProjects = await Promise.all(projectCreates);
   todoistSyncProgress.done = createdProjects.length;
 
-  // Update existing projects in parallel (only if name/color changed)
   const projectUpdates = state.tasks
     .filter(cat => cat.todoistId)
     .map(async (cat) => {
@@ -142,9 +144,8 @@ async function todoistPush(){
           });
         }
       } catch (e) {
-        // Handle both explicit 404 AND CORS-blocked 404s (which appear as "Network error")
         if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
-          console.warn(`[Todoist Sync] Project ID ${cat.todoistId} missing or blocked. Clearing ID to recreate.`);
+          console.warn(`[Todoist Sync] Project ID ${cat.todoistId} missing. Clearing ID to recreate.`);
           const oldId = cat.todoistId;
           cat.todoistId = null;
           delete todoistMap.projects[oldId];
@@ -158,7 +159,6 @@ async function todoistPush(){
   todoistSyncProgress = { phase: "sections", done: 0, total: state.tasks.reduce((a, c) => a + (c.groups || []).length, 0) };
   renderTodoistPanel();
 
-  // Create sections in parallel
   const sectionCreates = [];
   for (const cat of state.tasks) {
     if (!cat.todoistId) continue;
@@ -174,7 +174,6 @@ async function todoistPush(){
   await Promise.all(sectionCreates);
   todoistSyncProgress.done = sectionCreates.length;
 
-  // Update existing sections in parallel
   const sectionUpdates = [];
   for (const cat of state.tasks) {
     if (!cat.todoistId) continue;
@@ -192,7 +191,7 @@ async function todoistPush(){
               }
             } catch (e) {
               if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
-                console.warn(`[Todoist Sync] Section ID ${g.todoistSectionId} missing or blocked. Clearing ID.`);
+                console.warn(`[Todoist Sync] Section ID ${g.todoistSectionId} missing. Clearing ID.`);
                 const oldId = g.todoistSectionId;
                 g.todoistSectionId = null;
                 delete todoistMap.sections[oldId];
@@ -207,7 +206,6 @@ async function todoistPush(){
   }
   await Promise.all(sectionUpdates);
 
-  // Push checklist tasks in parallel
   const taskPromises = [];
   for (const cat of state.tasks) {
     if (!cat.todoistId) continue;
@@ -221,7 +219,6 @@ async function todoistPush(){
     }
   }
 
-  // Push timetable task blocks
   const timetableTaskPromises = await pushTimetableTasks();
   taskPromises.push(...timetableTaskPromises);
 
@@ -268,11 +265,10 @@ async function todoistPushTask(t, cat, sectionId){
       await todoistFetch("/tasks/"+t.todoistId, { method:"POST", body:JSON.stringify(body) });
     } catch (e) {
       if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
-        console.warn(`[Todoist Sync] Task ID ${t.todoistId} missing or blocked. Clearing ID to recreate.`);
+        console.warn(`[Todoist Sync] Task ID ${t.todoistId} missing. Clearing ID to recreate.`);
         const oldId = t.todoistId;
         t.todoistId = null;
         delete todoistMap.tasks[oldId];
-        // Recreate the task
         await todoistPushTask(t, cat, sectionId);
       } else {
         throw e;
@@ -285,20 +281,13 @@ async function pushTimetableTasks(){
   if(!todoistToken) return [];
   const timetableTasks = state.timetable.filter(b=> b.type==="task" && b.todoistId);
   if(!timetableTasks.length) return [];
-  
-  // Get or create the Timetable project once
   const projectId = await ensureTimetableProject();
-  
-  // Push all blocks in parallel
   return timetableTasks.map(b => pushTimetableTaskBlock(b, projectId));
 }
 
 function ensureTimetableProject(){
-  // Find existing timetable project
   const existing = state.tasks.find(c => c.name === "Timetable" && c.todoistId);
   if(existing) return Promise.resolve(existing.todoistId);
-  
-  // Create new project
   return todoistFetch("/projects", {
     method: "POST",
     body: JSON.stringify({ name: "Timetable", color: 34 })
@@ -312,15 +301,13 @@ function ensureTimetableProject(){
 
 async function pushTimetableTaskBlock(block, projectId){
   if(!block.todoistId){
-    const body = { 
-      content: block.title, 
+    const body = {
+      content: block.title,
       project_id: projectId,
       description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`
     };
-    // Set due date to the start time on the block's day
     const dueDate = getDueDateForBlock(block);
     if(dueDate) body.due_date = dueDate;
-    
     const td = await todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) });
     block.todoistId = td.id;
     todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
@@ -330,7 +317,6 @@ async function pushTimetableTaskBlock(block, projectId){
       const dueDate = getDueDateForBlock(block);
       if(dueDate) body.due_date = dueDate;
       body.description = `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`;
-      
       await todoistFetch("/tasks/"+block.todoistId, { method:"POST", body:JSON.stringify(body) });
     } catch (e) {
       if (e.message === "NOT_FOUND") {
@@ -338,7 +324,6 @@ async function pushTimetableTaskBlock(block, projectId){
         const oldId = block.todoistId;
         block.todoistId = null;
         delete todoistMap.tasks[oldId];
-        // Recreate the task
         await pushTimetableTaskBlock(block, projectId);
       } else {
         throw e;
@@ -348,28 +333,25 @@ async function pushTimetableTaskBlock(block, projectId){
 }
 
 function getDueDateForBlock(block){
-  // Calculate the next occurrence date for this block's day
   const today = new Date();
-  const todayDow = today.getDay(); // 0=Sun, 1=Mon...
-  const blockDow = block.day + 1; // 0=Mon -> 1, 4=Fri -> 5
-  
+  const todayDow = today.getDay();
+  const blockDow = block.day + 1;
   let daysUntil = blockDow - todayDow;
   if(daysUntil < 0) daysUntil += 7;
   if(daysUntil === 0){
-    // Today - check if time has passed
     const nowMin = today.getHours()*60 + today.getMinutes();
     const startMin = timeToMin(block.start);
     if(nowMin > startMin) daysUntil = 7;
   }
-  
   const dueDate = new Date(today);
   dueDate.setDate(today.getDate() + daysUntil);
   return isoDate(dueDate);
 }
 
+// ─── COMPLETIONS ─────────────────────────────────────────────────────────────
+
 async function todoistPushCompletions(){
   if(!todoistToken) return;
-  // Checklist tasks
   for(const cat of state.tasks){
     const allTasks = cat.tasks.concat((cat.groups||[]).reduce((a,g)=>a.concat(g.tasks||[]),[]));
     for(const t of allTasks){
@@ -389,7 +371,6 @@ async function todoistPushCompletions(){
       }
     }
   }
-  // Timetable task blocks
   for(const block of state.timetable){
     if(block.type!=="task" || !block.todoistId) continue;
     const done = block.completed;
@@ -409,6 +390,8 @@ async function todoistPushCompletions(){
   saveTodoistMap();
 }
 
+// ─── PULL ────────────────────────────────────────────────────────────────────
+
 async function todoistPull(){
   if(!todoistToken) return false;
 
@@ -419,38 +402,76 @@ async function todoistPull(){
     todoistFetch("/tasks/completed").then(todoistToArray)
   ]);
 
-  const completedIds = new Set((tdCompleted||[]).map(t=>t.id));
-
   let changed = false;
+  const mode = todoistSyncMode;
+
+  // Build reverse lookup: local category name → local category (for name-based matching)
+  const localCatByName = {};
+  for(const cat of state.tasks){
+    localCatByName[cat.name.toLowerCase()] = cat;
+  }
+
+  // ── Projects ──
   const projById = {};
   (tdProjects||[]).forEach(p=>{
     projById[p.id] = p;
-    if(!todoistMap.projects[p.id]){
-      const cat = { id:uid(), name:p.name, color:"#888888", tasks:[], groups:[], todoistId:p.id };
-      state.tasks.push(cat);
-      todoistMap.projects[p.id] = cat.id;
+    if(todoistMap.projects[p.id]){
+      // Already mapped — nothing to do
+      return;
+    }
+    // Not mapped — try to find a local category by name
+    const localMatch = localCatByName[p.name.toLowerCase()];
+    if(localMatch && !localMatch.todoistId){
+      // Link existing local category to this Todoist project
+      localMatch.todoistId = p.id;
+      todoistMap.projects[p.id] = localMatch.id;
       changed = true;
+    } else {
+      // No local match — import as new (but only if mode allows it)
+      if(mode !== "keystone"){
+        const cat = { id:uid(), name:p.name, color:"#888888", tasks:[], groups:[], todoistId:p.id };
+        state.tasks.push(cat);
+        todoistMap.projects[p.id] = cat.id;
+        changed = true;
+      }
+      // In keystone mode: skip importing unknown Todoist projects
     }
   });
+
+  // ── Sections ──
+  // Build reverse lookup: local group name → local group (within each category)
+  const localGroupByName = {};
+  for(const cat of state.tasks){
+    for(const g of (cat.groups||[])){
+      const key = cat.id + "|" + g.name.toLowerCase();
+      localGroupByName[key] = g;
+    }
+  }
 
   const secById = {};
   (tdSections||[]).forEach(s=>{
     secById[s.id] = s;
-    if(!todoistMap.sections[s.id]){
-      const catAppId = todoistMap.projects[s.project_id];
-      if(catAppId){
-        const cat = state.tasks.find(c=>c.id===catAppId);
-        if(cat){
-          const g = { id:uid(), name:s.name, tasks:[], todoistSectionId:s.id };
-          cat.groups.push(g);
-          todoistMap.sections[s.id] = { catId:cat.id, groupId:g.id };
-          changed = true;
-        }
-      }
+    if(todoistMap.sections[s.id]) return;
+    const catAppId = todoistMap.projects[s.project_id];
+    if(!catAppId) return;
+    const cat = state.tasks.find(c=>c.id===catAppId);
+    if(!cat) return;
+
+    const key = cat.id + "|" + s.name.toLowerCase();
+    const localMatch = localGroupByName[key];
+    if(localMatch && !localMatch.todoistSectionId){
+      localMatch.todoistSectionId = s.id;
+      todoistMap.sections[s.id] = { catId:cat.id, groupId:localMatch.id };
+      changed = true;
+    } else if(mode !== "keystone"){
+      const g = { id:uid(), name:s.name, tasks:[], todoistSectionId:s.id };
+      cat.groups.push(g);
+      todoistMap.sections[s.id] = { catId:cat.id, groupId:g.id };
+      changed = true;
     }
   });
 
-  // Pre-build lookup maps for O(1) access instead of O(n²)
+  // ── Build task lookup maps ──
   const taskIdToLocal = new Map();
   const catById = new Map(state.tasks.map(c => [c.id, c]));
   for(const cat of state.tasks){
@@ -460,12 +481,26 @@ async function todoistPull(){
     }
   }
 
-  // Separate timetable project tasks from checklist tasks
+  // Build reverse lookup: title → local task (within each category)
+  const localTaskByTitle = {};
+  for(const cat of state.tasks){
+    for(const t of cat.tasks){
+      const key = cat.id + "|" + (t.title||"").toLowerCase();
+      localTaskByTitle[key] = t;
+    }
+    for(const g of cat.groups||[]){
+      for(const t of g.tasks||[]){
+        const key = cat.id + "|" + (t.title||"").toLowerCase();
+        localTaskByTitle[key] = t;
+      }
+    }
+  }
+
   const timetableProjectId = state.tasks.find(c => c.name === "Timetable" && c.todoistId)?.todoistId;
   const checklistTasks = (tdTasks||[]).filter(td => td.project_id !== timetableProjectId);
   const timetableTasks = (tdTasks||[]).filter(td => td.project_id === timetableProjectId);
 
-  // Process checklist tasks (existing logic)
+  // ── Checklist tasks ──
   checklistTasks.forEach(td=>{
     const catAppId = todoistMap.projects[td.project_id];
     if(!catAppId) return;
@@ -483,58 +518,68 @@ async function todoistPull(){
     const existing = mapped ? taskIdToLocal.get(mapped.taskId) : null;
 
     if(existing){
-      existing.task.title = td.content;
-      existing.task.due = (td.due && td.due.date) ? td.due.date : null;
-      existing.task.priority = todoistToAppPriority(td.priority||0);
-      existing.task.description = td.description || "";
-      existing.task.done = false;
-      existing.task.completedAt = null;
-      changed = true;
+      // Task already mapped — update only if mode is not keystone
+      if(mode !== "keystone"){
+        existing.task.title = td.content;
+        existing.task.due = (td.due && td.due.date) ? td.due.date : null;
+        existing.task.priority = todoistToAppPriority(td.priority||0);
+        existing.task.description = td.description || "";
+        existing.task.done = false;
+        existing.task.completedAt = null;
+        changed = true;
+      }
     } else {
-      const newTask = makeTask({
-        title:td.content,
-        due:(td.due && td.due.date) ? td.due.date : null,
-        priority:todoistToAppPriority(td.priority||0),
-        description:td.description||"",
-        done:false,
-        completedAt:null,
-        todoistId:td.id,
-        parentId:(td.parent_id && todoistMap.tasks[td.parent_id]) ? todoistMap.tasks[td.parent_id].taskId : null
-      });
-      targetArr.push(newTask);
-      todoistMap.tasks[td.id] = { catId:cat.id, taskId:newTask.id };
-      changed = true;
+      // Not mapped — try to find a local task by title
+      const titleKey = cat.id + "|" + td.content.toLowerCase();
+      const localTitleMatch = localTaskByTitle[titleKey];
+      if(localTitleMatch && !localTitleMatch.todoistId){
+        localTitleMatch.todoistId = td.id;
+        todoistMap.tasks[td.id] = { catId:cat.id, taskId:localTitleMatch.id };
+        changed = true;
+      } else if(mode !== "keystone"){
+        const newTask = makeTask({
+          title:td.content,
+          due:(td.due && td.due.date) ? td.due.date : null,
+          priority:todoistToAppPriority(td.priority||0),
+          description:td.description||"",
+          done:false,
+          completedAt:null,
+          todoistId:td.id,
+          parentId:(td.parent_id && todoistMap.tasks[td.parent_id]) ? todoistMap.tasks[td.parent_id].taskId : null
+        });
+        targetArr.push(newTask);
+        todoistMap.tasks[td.id] = { catId:cat.id, taskId:newTask.id };
+        changed = true;
+      }
     }
   });
 
-  // Process timetable tasks
+  // ── Timetable tasks ──
   timetableTasks.forEach(td=>{
     const mapped = todoistMap.tasks[td.id];
     if(mapped && mapped.type === "timetable"){
-      // Existing timetable block
       const block = state.timetable.find(b => b.id === mapped.blockId);
       if(block){
-        block.title = td.content;
-        block.completed = false;
-        block.completedAt = null;
-        // Update due date from Todoist
-        if(td.due && td.due.date) block.due = td.due.date;
-        changed = true;
+        if(mode !== "keystone"){
+          block.title = td.content;
+          block.completed = false;
+          block.completedAt = null;
+          if(td.due && td.due.date) block.due = td.due.date;
+          changed = true;
+        }
       }
     } else if(!mapped){
-      // New timetable task from Todoist - try to parse and create block
       parseAndCreateTimetableBlock(td);
       changed = true;
     }
   });
 
-  // Handle completed tasks (both checklist and timetable)
+  // ── Completed tasks ──
   (tdCompleted||[]).forEach(td=>{
     const mapped = todoistMap.tasks[td.id];
     if(!mapped) return;
-    
+
     if(mapped.type === "timetable"){
-      // Timetable block completion
       const block = state.timetable.find(b => b.id === mapped.blockId);
       if(block && !block.completed){
         block.completed = true;
@@ -542,7 +587,6 @@ async function todoistPull(){
         changed = true;
       }
     } else {
-      // Checklist task completion (existing logic)
       const cat = catById.get(mapped.catId);
       if(!cat) return;
       const existing = taskIdToLocal.get(mapped.taskId);
@@ -562,21 +606,18 @@ async function todoistPull(){
 }
 
 function parseAndCreateTimetableBlock(td){
-  // Try to parse the description to extract day/time info
-  // Format: [Timetable Mon 09:00-10:00] description
   const desc = td.description || "";
   const match = desc.match(/\[Timetable\s+(Mon|Tue|Wed|Thu|Fri)\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\]/);
   if(!match) return;
-  
+
   const dayMap = {Mon:0, Tue:1, Wed:2, Thu:3, Fri:4, Sat:5, Sun:6};
   const day = dayMap[match[1]];
   if(day === undefined) return;
-  
+
   const start = match[2];
   const end = match[3];
-  
-  // Check if block already exists
-  const existing = state.timetable.find(b => 
+
+  const existing = state.timetable.find(b =>
     b.day === day && b.start === start && b.end === end && b.title === td.content
   );
   if(existing){
@@ -584,8 +625,7 @@ function parseAndCreateTimetableBlock(td){
     todoistMap.tasks[td.id] = { type: "timetable", blockId: existing.id };
     return;
   }
-  
-  // Create new block
+
   const block = makeBlock({
     type: "task",
     title: td.content,
@@ -600,17 +640,26 @@ function parseAndCreateTimetableBlock(td){
   todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
 }
 
+// ─── MAIN SYNC ORCHESTRATOR ──────────────────────────────────────────────────
+
 async function todoistSync(){
   if(!todoistToken || todoistInFlight) return;
   todoistInFlight = true;
   todoistSyncStatus = "syncing";
   renderTodoistPanel();
   try{
-    await todoistPush();
-    const [, pulled] = await Promise.all([
-      todoistPushCompletions(),
-      todoistPull()
-    ]);
+    // PULL FIRST to populate todoistMap before push creates anything
+    const pulled = await todoistPull();
+
+    // Then push (creates new items in Todoist, updates existing)
+    if(typeof window.todoistPushWithConflictResolution === "function"){
+      await window.todoistPushWithConflictResolution();
+    } else {
+      await todoistPush();
+    }
+
+    await todoistPushCompletions();
+
     todoistSyncStatus = "synced";
     todoistLastSyncAt = Date.now();
     save();
@@ -633,7 +682,10 @@ function scheduleTodoistPush(){
 function initTodoistSync(){
   loadTodoistMap();
   todoistToken = localStorage.getItem(TODOIST_TOKEN_KEY) || "";
+  todoistSyncMode = localStorage.getItem(TODOIST_SYNC_MODE_KEY) || "keystone";
 }
+
+// ─── UI ──────────────────────────────────────────────────────────────────────
 
 function renderTodoistPanel(){
   const el = document.getElementById("todoistPanel");
@@ -659,7 +711,7 @@ function renderTodoistPanel(){
     : todoistSyncStatus==="error" ? '<span class="badge badge-danger">Error</span>'
     : todoistSyncStatus==="synced" ? '<span class="badge badge-success">Synced</span>'
     : '<span class="badge badge-muted">Connected</span>';
-  
+
   let progressHtml = "";
   if(todoistSyncStatus === "syncing" && todoistSyncProgress.total > 0){
     const pct = Math.round((todoistSyncProgress.done / todoistSyncProgress.total) * 100);
@@ -674,43 +726,72 @@ function renderTodoistPanel(){
         </div>
       </div>`;
   }
-  
+
+  const modeLabels = { keystone: "Keystone (push + import new)", todoist: "Todoist (pull overwrites)", bidirectional: "Bidirectional (both ways)" };
+  const modeDescs = {
+    keystone: "Keystone is source of truth. Only new items from Todoist are imported.",
+    todoist: "Todoist is source of truth. Pull overwrites local data.",
+    bidirectional: "Full two-way sync. Conflicts are resolved manually."
+  };
+
   el.innerHTML = `
     <div style="font-size:13px; margin-bottom:4px;">Connected to <b>Todoist</b> ${badge}</div>
     <div style="font-size:11.5px; color:var(--text-faint); margin-bottom:14px;">${todoistLastSyncAt ? "Last synced "+timeAgoShort(Date.now()-todoistLastSyncAt)+" ago" : "Syncing now…"}</div>
     ${progressHtml}
+    <div style="margin-bottom:12px;">
+      <label class="field" style="font-size:12px; margin-bottom:4px;">Sync mode</label>
+      <select class="input" id="tdSyncModeSelect" style="font-size:12px; padding:6px 8px;">
+        <option value="keystone" ${todoistSyncMode==="keystone"?"selected":""}>Keystone (push + import new)</option>
+        <option value="todoist" ${todoistSyncMode==="todoist"?"selected":""}>Todoist (pull overwrites)</option>
+        <option value="bidirectional" ${todoistSyncMode==="bidirectional"?"selected":""}>Bidirectional (both ways)</option>
+      </select>
+      <p style="font-size:10.5px; color:var(--text-faint); margin-top:4px;">${modeDescs[todoistSyncMode]}</p>
+    </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <button class="btn btn-primary" id="tdSyncNowBtn">Sync now</button>
       <button class="btn btn-danger" id="tdResetSyncBtn">Reset Todoist Sync</button>
       <button class="btn" id="tdDisconnectBtn">Disconnect</button>
     </div>
-    <p style="font-size:11px; color:var(--text-faint); margin-top:8px;">Reset clears all Todoist ID links locally and forces a fresh recreate on next sync. Your tasks & data are preserved.</p>`;
+    <p style="font-size:11px; color:var(--text-faint); margin-top:8px;">Reset clears all Todoist ID links locally and forces a fresh reconcile on next sync. Your tasks & data are preserved.</p>`;
+
+  el.querySelector("#tdSyncModeSelect").addEventListener("change", (e)=>{
+    todoistSyncMode = e.target.value;
+    localStorage.setItem(TODOIST_SYNC_MODE_KEY, todoistSyncMode);
+    renderTodoistPanel();
+  });
+
   el.querySelector("#tdSyncNowBtn").addEventListener("click", async ()=>{
     const btn = el.querySelector("#tdSyncNowBtn"); btn.textContent="Syncing…"; btn.disabled=true;
     await todoistSync();
     btn.textContent="Sync now"; btn.disabled=false;
   });
   el.querySelector("#tdResetSyncBtn").addEventListener("click", ()=>{
-    if(confirm("Reset all Todoist sync links? This will clear all todoistId references and recreate everything fresh on the next sync. Your local tasks, subjects, and timetable data will NOT be deleted.")){
-      // Clear all todoistId refs from state
-      for(const cat of state.tasks){
-        delete cat.todoistId;
-        for(const g of (cat.groups || [])){
-          delete g.todoistSectionId;
-          for(const t of (g.items || [])) delete t.todoistId;
+    if(typeof window.resetTodoistSyncProperly === "function"){
+      window.resetTodoistSyncProperly();
+    } else {
+      const tip = todoistSyncMode === "keystone"
+        ? "After reset, Keystone data will be pushed to Todoist on next sync."
+        : todoistSyncMode === "todoist"
+        ? "After reset, Todoist data will overwrite your local data on next sync."
+        : "After reset, you'll be prompted to choose the source of truth for each project.";
+      if(confirm("Reset all Todoist sync links?\n\nThis will clear all todoistId references and recreate everything fresh on the next sync. Your local tasks, subjects, and timetable data will NOT be deleted.\n\n" + tip)){
+        for(const cat of state.tasks){
+          delete cat.todoistId;
+          for(const g of (cat.groups || [])){
+            delete g.todoistSectionId;
+            for(const t of (g.tasks || [])) delete t.todoistId;
+          }
         }
+        for(const slot of (state.timetable || [])){
+          for(const t of (slot.tasks || [])) delete t.todoistId;
+        }
+        todoistMap = {projects:{},sections:{},tasks:{},completed:{}};
+        saveTodoistMap();
+        save();
+        todoistSyncStatus = "idle";
+        toast("Todoist sync reset. Press 'Sync now' to reconcile.");
+        renderTodoistPanel();
       }
-      // Clear timetable task todoistIds
-      for(const slot of (state.timetable || [])){
-        for(const t of (slot.tasks || [])) delete t.todoistId;
-      }
-      // Wipe the map
-      todoistMap = {projects:{},sections:{},tasks:{},completed:{}};
-      saveTodoistMap();
-      save();
-      todoistSyncStatus = "idle";
-      toast("Todoist sync reset. Press 'Sync now' to recreate.");
-      renderTodoistPanel();
     }
   });
   el.querySelector("#tdDisconnectBtn").addEventListener("click", ()=>{

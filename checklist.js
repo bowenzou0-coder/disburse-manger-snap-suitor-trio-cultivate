@@ -1,6 +1,39 @@
 "use strict";
 
-let checklistState = { activeCat: null, filter: "all" };
+let checklistState = { activeCat: null, filter: "all", selectMode: false, selectedCats: new Set() };
+
+function cleanupTodoistIdsForCat(cat){
+  if(cat.todoistId){
+    if(typeof todoistMap !== "undefined" && todoistMap.projects){
+      delete todoistMap.projects[cat.todoistId];
+    }
+    delete cat.todoistId;
+  }
+  for(const g of (cat.groups || [])){
+    if(g.todoistSectionId){
+      if(typeof todoistMap !== "undefined" && todoistMap.sections){
+        delete todoistMap.sections[g.todoistSectionId];
+      }
+      delete g.todoistSectionId;
+    }
+    for(const t of (g.tasks || [])){
+      if(t.todoistId){
+        if(typeof todoistMap !== "undefined" && todoistMap.tasks){
+          delete todoistMap.tasks[t.todoistId];
+        }
+        delete t.todoistId;
+      }
+    }
+  }
+  for(const t of (cat.tasks || [])){
+    if(t.todoistId){
+      if(typeof todoistMap !== "undefined" && todoistMap.tasks){
+        delete todoistMap.tasks[t.todoistId];
+      }
+      delete t.todoistId;
+    }
+  }
+}
 
 function ensureActiveCat(){
   if(!state.tasks.length) return null;
@@ -20,17 +53,76 @@ function renderChecklist(){
   const sidebar = document.getElementById("catSidebar");
   ensureActiveCat();
   const scheduledToday = taskRelevantToday;
-  const catListHtml = state.tasks.map(c=>{
-    const remaining = c.tasks.filter(scheduledToday).filter(t=>!taskDoneToday(t)).length
-      + c.groups.reduce((a,g)=>a+g.tasks.filter(scheduledToday).filter(t=>!taskDoneToday(t)).length,0);
-    return `<div class="cat-item ${c.id===checklistState.activeCat && checklistState.filter==='all'?'active':''}" data-cat="${c.id}">
-      <span class="dot" style="background:${c.color}"></span><span>${escapeHtml(c.name)}</span><span class="cat-count">${remaining}</span></div>`;
-  }).join("");
-  sidebar.innerHTML = catListHtml + `<div id="catAddSlot"></div>`;
-  sidebar.querySelectorAll("[data-cat]").forEach(el=> el.addEventListener("click", ()=>{
-    checklistState.activeCat = el.dataset.cat; checklistState.filter="all"; renderChecklist();
-  }));
-  wireInlineAddCategory(document.getElementById("catAddSlot"));
+  if(checklistState.selectMode){
+    const catListHtml = state.tasks.map(c=>{
+      const checked = checklistState.selectedCats.has(c.id);
+      return `<div class="cat-item cat-item-select" data-cat-sel="${c.id}">
+        <input type="checkbox" class="cat-checkbox" data-sel-cat="${c.id}" ${checked?"checked":""}>
+        <span class="dot" style="background:${c.color}"></span><span>${escapeHtml(c.name)}</span></div>`;
+    }).join("");
+    const selCount = checklistState.selectedCats.size;
+    const allSelected = state.tasks.length > 0 && selCount === state.tasks.length;
+    sidebar.innerHTML = catListHtml + `
+      <div style="padding:6px 10px; display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+        <button class="btn btn-sm" id="catSelectAllBtn">${allSelected ? "Deselect All" : "Select All"}</button>
+        <button class="btn btn-danger btn-sm" id="catBulkDeleteBtn" ${selCount===0?"disabled":""}>Delete Selected${selCount?" ("+selCount+")":""}</button>
+        <button class="btn btn-sm" id="catSelectCancelBtn">Cancel</button>
+      </div>`;
+    sidebar.querySelectorAll("[data-sel-cat]").forEach(el=> el.addEventListener("change", (e)=>{
+      if(e.target.checked) checklistState.selectedCats.add(el.dataset.selCat);
+      else checklistState.selectedCats.delete(el.dataset.selCat);
+      renderChecklist();
+    }));
+    sidebar.querySelectorAll("[data-cat-sel]").forEach(el=> el.addEventListener("click", (e)=>{
+      if(e.target.tagName==="INPUT") return;
+      const cb = sidebar.querySelector(`[data-sel-cat="${el.dataset.catSel}"]`);
+      if(cb) cb.click();
+    }));
+    sidebar.querySelector("#catSelectCancelBtn").addEventListener("click", ()=>{
+      checklistState.selectMode = false;
+      checklistState.selectedCats.clear();
+      renderChecklist();
+    });
+    sidebar.querySelector("#catSelectAllBtn").addEventListener("click", ()=>{
+      if(allSelected) checklistState.selectedCats.clear();
+      else state.tasks.forEach(c=> checklistState.selectedCats.add(c.id));
+      renderChecklist();
+    });
+    sidebar.querySelector("#catBulkDeleteBtn").addEventListener("click", ()=>{
+      const count = checklistState.selectedCats.size;
+      if(!count) return;
+      if(!confirm(`Delete ${count} categor${count===1?"y":"ies"} and all their tasks/sections?\n\nThis will also remove their Todoist sync links. This cannot be undone.`)) return;
+      for(const catId of checklistState.selectedCats){
+        const cat = state.tasks.find(c=>c.id===catId);
+        if(cat) cleanupTodoistIdsForCat(cat);
+      }
+      state.tasks = state.tasks.filter(c=> !checklistState.selectedCats.has(c.id));
+      checklistState.selectedCats.clear();
+      checklistState.selectMode = false;
+      checklistState.activeCat = null;
+      save(); renderChecklist();
+    });
+  } else {
+    const catListHtml = state.tasks.map(c=>{
+      const remaining = c.tasks.filter(scheduledToday).filter(t=>!taskDoneToday(t)).length
+        + c.groups.reduce((a,g)=>a+g.tasks.filter(scheduledToday).filter(t=>!taskDoneToday(t)).length,0);
+      return `<div class="cat-item ${c.id===checklistState.activeCat && checklistState.filter==='all'?'active':''}" data-cat="${c.id}">
+        <span class="dot" style="background:${c.color}"></span><span>${escapeHtml(c.name)}</span><span class="cat-count">${remaining}</span></div>`;
+    }).join("");
+    let bottomHtml = `<div id="catAddSlot"></div>`;
+    if(state.tasks.length) bottomHtml += `<div style="padding:6px 10px;"><button class="btn btn-sm cat-manage-btn" id="catManageBtn">Select</button></div>`;
+    sidebar.innerHTML = catListHtml + bottomHtml;
+    sidebar.querySelectorAll("[data-cat]").forEach(el=> el.addEventListener("click", ()=>{
+      checklistState.activeCat = el.dataset.cat; checklistState.filter="all"; renderChecklist();
+    }));
+    wireInlineAddCategory(document.getElementById("catAddSlot"));
+    const manageBtn = sidebar.querySelector("#catManageBtn");
+    if(manageBtn) manageBtn.addEventListener("click", ()=>{
+      checklistState.selectMode = true;
+      checklistState.selectedCats.clear();
+      renderChecklist();
+    });
+  }
   const main = document.getElementById("checklistMain");
   if(checklistState.filter !== "all"){
     renderFilteredView(main);
@@ -64,6 +156,7 @@ function renderChecklist(){
   });
   main.querySelector(`[data-del-cat]`).addEventListener("click", ()=>{
     if(confirm(`Delete category "${cat.name}" and all its tasks?`)){
+      cleanupTodoistIdsForCat(cat);
       state.tasks = state.tasks.filter(c=>c.id!==cat.id); checklistState.activeCat=null; save(); renderChecklist();
     }
   });
