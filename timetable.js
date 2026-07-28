@@ -279,8 +279,8 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       <div class="input" id="bfDay" style="flex-wrap:wrap; gap:6px; padding:8px;"></div>
     </label>
     <div class="row">
-      <label class="field">Start<input class="input" type="text" inputmode="numeric" id="bfStart" value="${editing?editing.start:(prefillStart||'09:00')}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"></label>
-      <label class="field">End<input class="input" type="text" inputmode="numeric" id="bfEnd" value="${editing?editing.end:(prefillEnd||'10:00')}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"></label>
+      <label class="field">Start<div style="display:flex; gap:4px; align-items:center;"><input class="input" type="text" inputmode="numeric" id="bfStartH" value="${editing?editing.start.slice(0,2):(prefillStart||'09:00').slice(0,2)}" placeholder="HH" maxlength="2" style="width:44px; text-align:center;">:<input class="input" type="text" inputmode="numeric" id="bfStartM" value="${editing?editing.start.slice(3):(prefillStart||'09:00').slice(3)}" placeholder="MM" maxlength="2" style="width:44px; text-align:center;"></div></label>
+      <label class="field">End<div style="display:flex; gap:4px; align-items:center;"><input class="input" type="text" inputmode="numeric" id="bfEndH" value="${editing?editing.end.slice(0,2):(prefillEnd||'10:00').slice(0,2)}" placeholder="HH" maxlength="2" style="width:44px; text-align:center;">:<input class="input" type="text" inputmode="numeric" id="bfEndM" value="${editing?editing.end.slice(3):(prefillEnd||'10:00').slice(3)}" placeholder="MM" maxlength="2" style="width:44px; text-align:center;"></div></label>
     </div>
     <label class="field">Subject
       <div class="input" id="bfSubject"></div>
@@ -308,11 +308,9 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       const detected = autoDetectSubject(e.target.value);
       if(detected) initSelect(root.querySelector("#bfSubject"), subjOpts, detected.id);
     });
-    ["bfStart","bfEnd"].forEach(id=>{
+    ["bfStartH","bfStartM","bfEndH","bfEndM"].forEach(id=>{
       root.querySelector("#"+id).addEventListener("input", function(){
-        let v=this.value.replace(/\D/g,"").slice(0,4);
-        if(v.length>=2) v=v.slice(0,2)+":"+v.slice(2);
-        this.value=v;
+        this.value=this.value.replace(/\D/g,"").slice(0,2);
       });
     });
 
@@ -346,7 +344,8 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       }
     });
     root.querySelector("#bfSave").addEventListener("click", ()=>{
-      const start = root.querySelector("#bfStart").value, end = root.querySelector("#bfEnd").value;
+      const start = (root.querySelector("#bfStartH").value||"00").padStart(2,"0")+":"+(root.querySelector("#bfStartM").value||"00").padStart(2,"0");
+      const end = (root.querySelector("#bfEndH").value||"00").padStart(2,"0")+":"+(root.querySelector("#bfEndM").value||"00").padStart(2,"0");
       if(!start || !end || timeToMin(end)<=timeToMin(start)){ toast("End time must be after start time"); return; }
       const subjectId = root.querySelector("#bfSubject").value || null;
       const type = root.querySelector("#bfType").value;
