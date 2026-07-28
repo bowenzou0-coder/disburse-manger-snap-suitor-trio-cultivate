@@ -277,8 +277,8 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       <div class="input" id="bfDay" style="flex-wrap:wrap; gap:6px; padding:8px;"></div>
     </label>
     <div class="row">
-      <label class="field">Start<input class="input" type="time" id="bfStart" value="${editing?editing.start:(prefillStart||'09:00')}"></label>
-      <label class="field">End<input class="input" type="time" id="bfEnd" value="${editing?editing.end:(prefillEnd||'10:00')}"></label>
+      <label class="field">Start<input class="input" type="text" inputmode="numeric" id="bfStart" value="${editing?editing.start:(prefillStart||'09:00')}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"></label>
+      <label class="field">End<input class="input" type="text" inputmode="numeric" id="bfEnd" value="${editing?editing.end:(prefillEnd||'10:00')}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"></label>
     </div>
     <label class="field">Subject
       <div class="input" id="bfSubject"></div>
