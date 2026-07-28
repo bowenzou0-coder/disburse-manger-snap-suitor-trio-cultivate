@@ -97,8 +97,8 @@ function addDays(dateStr, n){ const d=new Date(dateStr+"T00:00:00"); d.setDate(d
 function daysBetween(a,b){ return Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000); }
 function timeToMin(t){ const [h,m]=t.split(":").map(Number); return h*60+m; }
 function minToTimeLabel(mins){
-  let h=Math.floor(mins/60), m=mins%60; const ap = h>=12?"PM":"AM"; let hh = h%12; if(hh===0) hh=12;
-  return `${hh}:${String(m).padStart(2,"0")} ${ap}`;
+  let h=Math.floor(mins/60), m=mins%60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
 }
 function fmtHM(mins){ const h=Math.floor(mins/60), m=mins%60; return h>0? `${h}h ${m}m` : `${m}m`; }
 function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
