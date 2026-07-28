@@ -1,6 +1,6 @@
 // Modern PWA Service Worker (v14)
 // Implements Stale-While-Revalidate with robust offline fallback for navigation requests.
-const CACHE_NAME = "keystone-v14";
+const CACHE_NAME = "keystone-v15";
 const CORE_ASSETS = [
   "./",
   "./index.html",
