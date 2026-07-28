@@ -85,7 +85,8 @@ function save(){
   if(prev) localStorage.setItem(BACKUP_KEY, prev);
   localStorage.setItem(KEY, JSON.stringify(state));
   schedulePush();
-  if(typeof scheduleTodoistPush === "function") scheduleTodoistPush();
+  // Automatic Todoist sync disabled to prevent unwanted background syncing and duplication.
+  // Sync is now manual-only via the Todoist panel.
 }
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }

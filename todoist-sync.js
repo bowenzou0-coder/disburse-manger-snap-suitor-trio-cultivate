@@ -4,8 +4,8 @@
  * Keystone Todoist Sync Module (v4)
  *
  * SYNC MODES:
- * - "keystone": Push local data to Todoist. Pull only imports NEW items (no local match).
- *                Never overwrites existing local data. Keystone is source of truth.
+ * - "keystone": Push local data to Todoist, overriding existing Todoist data.
+ *                Keystone is source of truth. Unmatched Todoist items are deleted on push.
  * - "todoist": Pull overwrites everything. Todoist is source of truth.
  * - "bidirectional": Full two-way sync with conflict dialogs on name mismatches.
  *
@@ -16,7 +16,7 @@
 
 const TODOIST_SYNC_API = "https://api.todoist.com/api/v1";
 const IS_LOCALHOST = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const API_BASE = IS_LOCALHOST ? "http://localhost:3001" : TODOIST_SYNC_API;
+const API_BASE = IS_LOCALHOST ? "http://localhost:3001/api/v1" : TODOIST_SYNC_API;
 
 const TODOIST_TOKEN_KEY = "keystone.todoistToken";
 const TODOIST_MAP_KEY = "keystone.todoistMap";
@@ -98,7 +98,11 @@ async function todoistFetch(path, opts, attempt){
   if(res.status===401) throw new Error("Invalid Todoist API token");
   if(res.status===404) throw new Error("NOT_FOUND");
   if(res.status===429) throw new Error("Todoist rate limit — try again later");
-  if(!res.ok) throw new Error("Todoist API "+res.status);
+  if(!res.ok){
+    let detail = "";
+    try{ const err = await res.json(); detail = err.error || err.message || JSON.stringify(err); }catch(e){ try{ detail = await res.text(); }catch(e){} }
+    throw new Error("Todoist API "+res.status+" — "+detail);
+  }
   const ct = res.headers.get("content-type")||"";
   if(!ct.includes("json") || res.status===204) return null;
   return await res.json();
@@ -119,109 +123,37 @@ function loadTodoistMap(){
 async function todoistPush(){
   if(!todoistToken || !state.tasks.length) return;
 
-  todoistSyncProgress = { phase: "projects", done: 0, total: state.tasks.length };
-  renderTodoistPanel();
+  const touchedTaskIds = new Set();
 
-  const projectCreates = state.tasks
-    .filter(cat => !cat.todoistId)
-    .map(cat => todoistFetch("/projects", {
-      method: "POST",
-      body: JSON.stringify({ name: cat.name, color: COLOR_MAP[cat.color] || 34 })
-    }).then(p => { cat.todoistId = p.id; todoistMap.projects[p.id] = cat.id; }));
+  // Fetch existing Todoist tasks for name-based matching
+  const tdTasks = todoistToArray(await todoistFetch("/tasks"));
 
-  const createdProjects = await Promise.all(projectCreates);
-  todoistSyncProgress.done = createdProjects.length;
+  const existingTasksByName = new Map();
+  tdTasks.forEach(t => existingTasksByName.set(t.content.toLowerCase(), t));
 
-  const projectUpdates = state.tasks
-    .filter(cat => cat.todoistId)
-    .map(async (cat) => {
-      try {
-        const current = await todoistFetch("/projects/" + cat.todoistId);
-        if (current && (current.name !== cat.name || current.color !== (COLOR_MAP[cat.color] || 34))) {
-          await todoistFetch("/projects/" + cat.todoistId, {
-            method: "POST",
-            body: JSON.stringify({ name: cat.name, color: COLOR_MAP[cat.color] || 34 })
-          });
-        }
-      } catch (e) {
-        if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
-          console.warn(`[Todoist Sync] Project ID ${cat.todoistId} missing. Clearing ID to recreate.`);
-          const oldId = cat.todoistId;
-          cat.todoistId = null;
-          delete todoistMap.projects[oldId];
-        } else {
-          throw e;
-        }
-      }
-    });
-
-  await Promise.all(projectUpdates);
-  todoistSyncProgress = { phase: "sections", done: 0, total: state.tasks.reduce((a, c) => a + (c.groups || []).length, 0) };
-  renderTodoistPanel();
-
-  const sectionCreates = [];
-  for (const cat of state.tasks) {
-    if (!cat.todoistId) continue;
-    for (const g of (cat.groups || [])) {
-      if (!g.todoistSectionId) {
-        sectionCreates.push(todoistFetch("/sections", {
-          method: "POST",
-          body: JSON.stringify({ project_id: cat.todoistId, name: g.name })
-        }).then(s => { g.todoistSectionId = s.id; todoistMap.sections[s.id] = { catId: cat.id, groupId: g.id }; }));
-      }
-    }
-  }
-  await Promise.all(sectionCreates);
-  todoistSyncProgress.done = sectionCreates.length;
-
-  const sectionUpdates = [];
-  for (const cat of state.tasks) {
-    if (!cat.todoistId) continue;
-    for (const g of (cat.groups || [])) {
-      if (g.todoistSectionId) {
-        sectionUpdates.push(
-          (async () => {
-            try {
-              const current = await todoistFetch("/sections/" + g.todoistSectionId);
-              if (current && current.name !== g.name) {
-                await todoistFetch("/sections/" + g.todoistSectionId, {
-                  method: "POST",
-                  body: JSON.stringify({ name: g.name })
-                });
-              }
-            } catch (e) {
-              if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
-                console.warn(`[Todoist Sync] Section ID ${g.todoistSectionId} missing. Clearing ID.`);
-                const oldId = g.todoistSectionId;
-                g.todoistSectionId = null;
-                delete todoistMap.sections[oldId];
-              } else {
-                throw e;
-              }
-            }
-          })()
-        );
-      }
-    }
-  }
-  await Promise.all(sectionUpdates);
-
+  // Collect push promises for all tasks
   const taskPromises = [];
+
+  // Checklist tasks
   for (const cat of state.tasks) {
-    if (!cat.todoistId) continue;
     for (const g of (cat.groups || [])) {
       for (const t of (g.tasks || [])) {
-        taskPromises.push(todoistPushTask(t, cat, g.todoistSectionId));
+        taskPromises.push(todoistPushTask(t, cat, existingTasksByName, touchedTaskIds));
       }
     }
     for (const t of (cat.tasks || [])) {
-      taskPromises.push(todoistPushTask(t, cat, null));
+      taskPromises.push(todoistPushTask(t, cat, existingTasksByName, touchedTaskIds));
     }
   }
 
-  const timetableTaskPromises = await pushTimetableTasks();
-  taskPromises.push(...timetableTaskPromises);
+  // Timetable tasks
+  for (const block of state.timetable) {
+    if(block.type==="task" && block.title && block.title.trim()){
+      taskPromises.push(pushTimetableTask(block, existingTasksByName, touchedTaskIds));
+    }
+  }
 
+  // Execute all pushes
   let completed = 0;
   const totalTasks = taskPromises.length;
   todoistSyncProgress = { phase: "tasks", done: 0, total: totalTasks };
@@ -236,40 +168,61 @@ async function todoistPush(){
     }
   }
 
+  // Cleanup: delete untouched tasks from inbox (keystone mode)
+  if(todoistSyncMode === "keystone"){
+    for(const t of tdTasks){
+      if(!touchedTaskIds.has(t.id)){
+        try{ await todoistFetch("/tasks/" + t.id, { method: "DELETE" }); }catch(e){}
+      }
+    }
+  }
+
   todoistSyncProgress = { phase: "done", done: 0, total: 0 };
   saveTodoistMap();
   save();
 }
 
-async function todoistPushTask(t, cat, sectionId){
+async function todoistPushTask(t, cat, existingTasksByName, touchedTaskIds){
   if(!t.todoistId){
-    const body = { content:t.title, project_id:cat.todoistId };
-    if(t.priority) body.priority = appToTodoistPriority(t.priority);
-    if(t.due) body.due_date = t.due;
-    if(t.description) body.description = t.description;
-    if(t.parentId){
-      const parentAll = cat.tasks.concat((cat.groups||[]).reduce((a,g)=>a.concat(g.tasks||[]),[]));
-      const parent = parentAll.find(x=>x.id===t.parentId);
-      if(parent && parent.todoistId) body.parent_id = parent.todoistId;
+    const existing = existingTasksByName.get(t.title.toLowerCase());
+    if (existing) {
+      t.todoistId = existing.id;
+      todoistMap.tasks[existing.id] = { catId: cat.id, taskId: t.id };
+      touchedTaskIds.add(existing.id);
+      const body = { content: t.title };
+      if(t.priority) body.priority = appToTodoistPriority(t.priority);
+      body.due_date = t.due || null;
+      body.description = t.description || "";
+      await todoistFetch("/tasks/" + existing.id, { method: "POST", body: JSON.stringify(body) });
+    } else {
+      const body = { content: t.title };
+      if(t.priority) body.priority = appToTodoistPriority(t.priority);
+      if(t.due) body.due_date = t.due;
+      if(t.description) body.description = t.description;
+      if(t.parentId){
+        const parentAll = cat.tasks.concat((cat.groups||[]).reduce((a,g)=>a.concat(g.tasks||[]),[]));
+        const parent = parentAll.find(x=>x.id===t.parentId);
+        if(parent && parent.todoistId) body.parent_id = parent.todoistId;
+      }
+      const td = await todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) });
+      t.todoistId = td.id;
+      todoistMap.tasks[td.id] = { catId:cat.id, taskId:t.id };
+      touchedTaskIds.add(td.id);
     }
-    if(!body.parent_id && sectionId) body.section_id = sectionId;
-    const td = await todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) });
-    t.todoistId = td.id;
-    todoistMap.tasks[td.id] = { catId:cat.id, taskId:t.id };
   } else {
     try {
-      const body = { content:t.title };
+      touchedTaskIds.add(t.todoistId);
+      const body = { content: t.title };
       if(t.priority) body.priority = appToTodoistPriority(t.priority);
       body.due_date = t.due || null;
       body.description = t.description || "";
       await todoistFetch("/tasks/"+t.todoistId, { method:"POST", body:JSON.stringify(body) });
     } catch (e) {
       if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
-        console.warn(`[Todoist Sync] Task ID ${t.todoistId} missing. Clearing ID to recreate.`);
         const oldId = t.todoistId;
         t.todoistId = null;
         delete todoistMap.tasks[oldId];
-        await todoistPushTask(t, cat, sectionId);
+        await todoistPushTask(t, cat, existingTasksByName, touchedTaskIds);
       } else {
         throw e;
       }
@@ -277,54 +230,51 @@ async function todoistPushTask(t, cat, sectionId){
   }
 }
 
-async function pushTimetableTasks(){
+async function pushTimetableTasks(existingTasksByName, touchedTaskIds){
   if(!todoistToken) return [];
-  const timetableTasks = state.timetable.filter(b=> b.type==="task" && b.todoistId);
-  if(!timetableTasks.length) return [];
-  const projectId = await ensureTimetableProject();
-  return timetableTasks.map(b => pushTimetableTaskBlock(b, projectId));
+  const blocks = state.timetable.filter(b=> b.type==="task" && b.title && b.title.trim());
+  if(!blocks.length) return [];
+  return blocks.map(b => pushTimetableTask(b, existingTasksByName, touchedTaskIds));
 }
 
-function ensureTimetableProject(){
-  const existing = state.tasks.find(c => c.name === "Timetable" && c.todoistId);
-  if(existing) return Promise.resolve(existing.todoistId);
-  return todoistFetch("/projects", {
-    method: "POST",
-    body: JSON.stringify({ name: "Timetable", color: 34 })
-  }).then(p => {
-    const cat = { id:uid(), name:"Timetable", color:"#5f8a63", tasks:[], groups:[], todoistId:p.id };
-    state.tasks.push(cat);
-    todoistMap.projects[p.id] = cat.id;
-    return p.id;
-  });
-}
-
-async function pushTimetableTaskBlock(block, projectId){
+async function pushTimetableTask(block, existingTasksByName, touchedTaskIds){
   if(!block.todoistId){
-    const body = {
-      content: block.title,
-      project_id: projectId,
-      description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`
-    };
-    const dueDate = getDueDateForBlock(block);
-    if(dueDate) body.due_date = dueDate;
-    const td = await todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) });
-    block.todoistId = td.id;
-    todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
+    const existing = existingTasksByName.get(block.title.toLowerCase());
+    if (existing) {
+      block.todoistId = existing.id;
+      todoistMap.tasks[existing.id] = { type: "timetable", blockId: block.id };
+      touchedTaskIds.add(existing.id);
+      const body = { content: block.title };
+      const dueDate = getDueDateForBlock(block);
+      if(dueDate) body.due_date = dueDate;
+      body.description = `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`;
+      await todoistFetch("/tasks/" + existing.id, { method:"POST", body:JSON.stringify(body) });
+    } else {
+      const body = {
+        content: block.title,
+        description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`
+      };
+      const dueDate = getDueDateForBlock(block);
+      if(dueDate) body.due_date = dueDate;
+      const td = await todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) });
+      block.todoistId = td.id;
+      todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
+      touchedTaskIds.add(td.id);
+    }
   } else {
     try {
+      touchedTaskIds.add(block.todoistId);
       const body = { content: block.title };
       const dueDate = getDueDateForBlock(block);
       if(dueDate) body.due_date = dueDate;
       body.description = `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`;
       await todoistFetch("/tasks/"+block.todoistId, { method:"POST", body:JSON.stringify(body) });
     } catch (e) {
-      if (e.message === "NOT_FOUND") {
-        console.warn(`[Todoist Sync] Timetable Task ID ${block.todoistId} not found. Clearing ID to recreate.`);
+      if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
         const oldId = block.todoistId;
         block.todoistId = null;
         delete todoistMap.tasks[oldId];
-        await pushTimetableTaskBlock(block, projectId);
+        await pushTimetableTask(block, existingTasksByName, touchedTaskIds);
       } else {
         throw e;
       }
@@ -395,9 +345,7 @@ async function todoistPushCompletions(){
 async function todoistPull(){
   if(!todoistToken) return false;
 
-  const [tdProjects, tdSections, tdTasks, tdCompleted] = await Promise.all([
-    todoistFetch("/projects").then(todoistToArray),
-    todoistFetch("/sections").then(todoistToArray),
+  const [tdTasks, tdCompleted] = await Promise.all([
     todoistFetch("/tasks").then(todoistToArray),
     todoistFetch("/tasks/completed").then(todoistToArray)
   ]);
@@ -405,73 +353,7 @@ async function todoistPull(){
   let changed = false;
   const mode = todoistSyncMode;
 
-  // Build reverse lookup: local category name → local category (for name-based matching)
-  const localCatByName = {};
-  for(const cat of state.tasks){
-    localCatByName[cat.name.toLowerCase()] = cat;
-  }
-
-  // ── Projects ──
-  const projById = {};
-  (tdProjects||[]).forEach(p=>{
-    projById[p.id] = p;
-    if(todoistMap.projects[p.id]){
-      // Already mapped — nothing to do
-      return;
-    }
-    // Not mapped — try to find a local category by name
-    const localMatch = localCatByName[p.name.toLowerCase()];
-    if(localMatch && !localMatch.todoistId){
-      // Link existing local category to this Todoist project
-      localMatch.todoistId = p.id;
-      todoistMap.projects[p.id] = localMatch.id;
-      changed = true;
-    } else {
-      // No local match — import as new (but only if mode allows it)
-      if(mode !== "keystone"){
-        const cat = { id:uid(), name:p.name, color:"#888888", tasks:[], groups:[], todoistId:p.id };
-        state.tasks.push(cat);
-        todoistMap.projects[p.id] = cat.id;
-        changed = true;
-      }
-      // In keystone mode: skip importing unknown Todoist projects
-    }
-  });
-
-  // ── Sections ──
-  // Build reverse lookup: local group name → local group (within each category)
-  const localGroupByName = {};
-  for(const cat of state.tasks){
-    for(const g of (cat.groups||[])){
-      const key = cat.id + "|" + g.name.toLowerCase();
-      localGroupByName[key] = g;
-    }
-  }
-
-  const secById = {};
-  (tdSections||[]).forEach(s=>{
-    secById[s.id] = s;
-    if(todoistMap.sections[s.id]) return;
-    const catAppId = todoistMap.projects[s.project_id];
-    if(!catAppId) return;
-    const cat = state.tasks.find(c=>c.id===catAppId);
-    if(!cat) return;
-
-    const key = cat.id + "|" + s.name.toLowerCase();
-    const localMatch = localGroupByName[key];
-    if(localMatch && !localMatch.todoistSectionId){
-      localMatch.todoistSectionId = s.id;
-      todoistMap.sections[s.id] = { catId:cat.id, groupId:localMatch.id };
-      changed = true;
-    } else if(mode !== "keystone"){
-      const g = { id:uid(), name:s.name, tasks:[], todoistSectionId:s.id };
-      cat.groups.push(g);
-      todoistMap.sections[s.id] = { catId:cat.id, groupId:g.id };
-      changed = true;
-    }
-  });
-
-  // ── Build task lookup maps ──
+  // Local task lookup: id → { cat, task, group }
   const taskIdToLocal = new Map();
   const catById = new Map(state.tasks.map(c => [c.id, c]));
   for(const cat of state.tasks){
@@ -481,96 +363,73 @@ async function todoistPull(){
     }
   }
 
-  // Build reverse lookup: title → local task (within each category)
+  // Title-based lookup across all categories (inbox-style matching)
   const localTaskByTitle = {};
   for(const cat of state.tasks){
-    for(const t of cat.tasks){
-      const key = cat.id + "|" + (t.title||"").toLowerCase();
-      localTaskByTitle[key] = t;
-    }
+    for(const t of cat.tasks) localTaskByTitle[(t.title||"").toLowerCase()] = { cat, task: t };
     for(const g of cat.groups||[]){
-      for(const t of g.tasks||[]){
-        const key = cat.id + "|" + (t.title||"").toLowerCase();
-        localTaskByTitle[key] = t;
-      }
+      for(const t of g.tasks||[]) localTaskByTitle[(t.title||"").toLowerCase()] = { cat, task: t };
     }
   }
 
-  const timetableProjectId = state.tasks.find(c => c.name === "Timetable" && c.todoistId)?.todoistId;
-  const checklistTasks = (tdTasks||[]).filter(td => td.project_id !== timetableProjectId);
-  const timetableTasks = (tdTasks||[]).filter(td => td.project_id === timetableProjectId);
+  // ── Tasks ──
+  (tdTasks||[]).forEach(td=>{
+    const isTimetable = td.description && /\[Timetable\s+(Mon|Tue|Wed|Thu|Fri)\s+\d{1,2}:\d{2}-\d{1,2}:\d{2}\]/.test(td.description);
 
-  // ── Checklist tasks ──
-  checklistTasks.forEach(td=>{
-    const catAppId = todoistMap.projects[td.project_id];
-    if(!catAppId) return;
-    const cat = catById.get(catAppId);
-    if(!cat) return;
-
-    let targetArr = cat.tasks;
-    if(td.section_id && todoistMap.sections[td.section_id]){
-      const secMap = todoistMap.sections[td.section_id];
-      const g = cat.groups.find(x=>x.id===secMap.groupId);
-      if(g) targetArr = g.tasks;
-    }
-
-    const mapped = todoistMap.tasks[td.id];
-    const existing = mapped ? taskIdToLocal.get(mapped.taskId) : null;
-
-    if(existing){
-      // Task already mapped — update only if mode is not keystone
-      if(mode !== "keystone"){
-        existing.task.title = td.content;
-        existing.task.due = (td.due && td.due.date) ? td.due.date : null;
-        existing.task.priority = todoistToAppPriority(td.priority||0);
-        existing.task.description = td.description || "";
-        existing.task.done = false;
-        existing.task.completedAt = null;
+    if(isTimetable){
+      const mapped = todoistMap.tasks[td.id];
+      if(mapped && mapped.type === "timetable"){
+        const block = state.timetable.find(b => b.id === mapped.blockId);
+        if(block){
+          if(mode !== "keystone"){
+            block.title = td.content;
+            block.completed = false;
+            block.completedAt = null;
+            if(td.due && td.due.date) block.due = td.due.date;
+            changed = true;
+          }
+        }
+      } else if(!mapped){
+        parseAndCreateTimetableBlock(td);
         changed = true;
       }
     } else {
-      // Not mapped — try to find a local task by title
-      const titleKey = cat.id + "|" + td.content.toLowerCase();
-      const localTitleMatch = localTaskByTitle[titleKey];
-      if(localTitleMatch && !localTitleMatch.todoistId){
-        localTitleMatch.todoistId = td.id;
-        todoistMap.tasks[td.id] = { catId:cat.id, taskId:localTitleMatch.id };
-        changed = true;
-      } else if(mode !== "keystone"){
-        const newTask = makeTask({
-          title:td.content,
-          due:(td.due && td.due.date) ? td.due.date : null,
-          priority:todoistToAppPriority(td.priority||0),
-          description:td.description||"",
-          done:false,
-          completedAt:null,
-          todoistId:td.id,
-          parentId:(td.parent_id && todoistMap.tasks[td.parent_id]) ? todoistMap.tasks[td.parent_id].taskId : null
-        });
-        targetArr.push(newTask);
-        todoistMap.tasks[td.id] = { catId:cat.id, taskId:newTask.id };
-        changed = true;
-      }
-    }
-  });
+      const mapped = todoistMap.tasks[td.id];
+      const existing = mapped ? taskIdToLocal.get(mapped.taskId) : null;
 
-  // ── Timetable tasks ──
-  timetableTasks.forEach(td=>{
-    const mapped = todoistMap.tasks[td.id];
-    if(mapped && mapped.type === "timetable"){
-      const block = state.timetable.find(b => b.id === mapped.blockId);
-      if(block){
+      if(existing){
         if(mode !== "keystone"){
-          block.title = td.content;
-          block.completed = false;
-          block.completedAt = null;
-          if(td.due && td.due.date) block.due = td.due.date;
+          existing.task.title = td.content;
+          existing.task.due = (td.due && td.due.date) ? td.due.date : null;
+          existing.task.priority = todoistToAppPriority(td.priority||0);
+          existing.task.description = td.description || "";
+          existing.task.done = false;
+          existing.task.completedAt = null;
+          changed = true;
+        }
+      } else {
+        const localMatch = localTaskByTitle[td.content.toLowerCase()];
+        if(localMatch && !localMatch.task.todoistId){
+          localMatch.task.todoistId = td.id;
+          todoistMap.tasks[td.id] = { catId: localMatch.cat.id, taskId: localMatch.task.id };
+          changed = true;
+        } else if(mode !== "keystone" && state.tasks.length){
+          const cat = state.tasks[0];
+          const newTask = makeTask({
+            title:td.content,
+            due:(td.due && td.due.date) ? td.due.date : null,
+            priority:todoistToAppPriority(td.priority||0),
+            description:td.description||"",
+            done:false,
+            completedAt:null,
+            todoistId:td.id,
+            parentId:(td.parent_id && todoistMap.tasks[td.parent_id]) ? todoistMap.tasks[td.parent_id].taskId : null
+          });
+          cat.tasks.push(newTask);
+          todoistMap.tasks[td.id] = { catId:cat.id, taskId:newTask.id };
           changed = true;
         }
       }
-    } else if(!mapped){
-      parseAndCreateTimetableBlock(td);
-      changed = true;
     }
   });
 
@@ -652,11 +511,7 @@ async function todoistSync(){
     const pulled = await todoistPull();
 
     // Then push (creates new items in Todoist, updates existing)
-    if(typeof window.todoistPushWithConflictResolution === "function"){
-      await window.todoistPushWithConflictResolution();
-    } else {
-      await todoistPush();
-    }
+    await todoistPush();
 
     await todoistPushCompletions();
 
@@ -692,7 +547,7 @@ function renderTodoistPanel(){
   if(!el) return;
   if(!todoistToken){
     el.innerHTML = `
-      <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Sync your Checklist with <b>Todoist</b>. Categories become projects, sections and tasks sync automatically.</p>
+      <p style="font-size:12.5px; color:var(--text-dim); margin-bottom:12px;">Sync your Checklist with <b>Todoist</b>. All tasks sync to/from the inbox — no projects or sections.</p>
       <label class="field">API token<input class="input" id="tdTokenInput" placeholder="Paste your token here" type="password"></label>
       <p style="font-size:11px; color:var(--text-faint); margin-bottom:10px;">Find it at <b>Todoist → Settings → Integrations → Developer</b>.</p>
       <button class="btn btn-primary" id="tdConnectBtn">Connect</button>`;
@@ -727,9 +582,9 @@ function renderTodoistPanel(){
       </div>`;
   }
 
-  const modeLabels = { keystone: "Keystone (push + import new)", todoist: "Todoist (pull overwrites)", bidirectional: "Bidirectional (both ways)" };
+  const modeLabels = { keystone: "Keystone (push override)", todoist: "Todoist (pull overwrites)", bidirectional: "Bidirectional (both ways)" };
   const modeDescs = {
-    keystone: "Keystone is source of truth. Only new items from Todoist are imported.",
+    keystone: "Keystone is source of truth. Push replaces Todoist data — any Todoist items not in Keystone are deleted.",
     todoist: "Todoist is source of truth. Pull overwrites local data.",
     bidirectional: "Full two-way sync. Conflicts are resolved manually."
   };
@@ -741,7 +596,7 @@ function renderTodoistPanel(){
     <div style="margin-bottom:12px;">
       <label class="field" style="font-size:12px; margin-bottom:4px;">Sync mode</label>
       <select class="input" id="tdSyncModeSelect" style="font-size:12px; padding:6px 8px;">
-        <option value="keystone" ${todoistSyncMode==="keystone"?"selected":""}>Keystone (push + import new)</option>
+        <option value="keystone" ${todoistSyncMode==="keystone"?"selected":""}>Keystone (push override)</option>
         <option value="todoist" ${todoistSyncMode==="todoist"?"selected":""}>Todoist (pull overwrites)</option>
         <option value="bidirectional" ${todoistSyncMode==="bidirectional"?"selected":""}>Bidirectional (both ways)</option>
       </select>
@@ -770,7 +625,7 @@ function renderTodoistPanel(){
       window.resetTodoistSyncProperly();
     } else {
       const tip = todoistSyncMode === "keystone"
-        ? "After reset, Keystone data will be pushed to Todoist on next sync."
+        ? "After reset, Keystone data will override Todoist on next sync (unmatched items are deleted)."
         : todoistSyncMode === "todoist"
         ? "After reset, Todoist data will overwrite your local data on next sync."
         : "After reset, you'll be prompted to choose the source of truth for each project.";
