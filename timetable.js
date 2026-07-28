@@ -273,8 +273,8 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
     <label class="field">Type
       <div class="input" id="bfType"></div>
     </label>
-    <label class="field">Day
-      <div class="input" id="bfDay"></div>
+    <label class="field">Day(s)
+      <div class="input" id="bfDay" style="flex-wrap:wrap; gap:6px; padding:8px;"></div>
     </label>
     <div class="row">
       <label class="field">Start<input class="input" type="time" id="bfStart" value="${editing?editing.start:(prefillStart||'09:00')}"></label>
@@ -299,8 +299,7 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
     initSelect(root.querySelector("#bfType"), [
       {value:"event",label:"Event"}, {value:"task",label:"Task"}, {value:"study",label:"Study Session"}
     ], editing?editing.type:"event");
-    initSelect(root.querySelector("#bfDay"), DAYS.map((d,i)=>({value:i,label:d})),
-      editing?editing.day:(prefillDay??0));
+    root.querySelector("#bfDay").innerHTML = DAYS.map((d,i)=>`<label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" value="${i}" ${(editing?editing.day:(prefillDay??0))===i?"checked":""}>${d}</label>`).join("");
     const subjOpts = [{value:"",label:"— None —"}].concat(state.subjects.map(s=>({value:s.id,label:s.name})));
     initSelect(root.querySelector("#bfSubject"), subjOpts, editing&&editing.subjectId?editing.subjectId:"");
     root.querySelector("#bfTitle").addEventListener("input", (e)=>{
@@ -345,12 +344,12 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       if(!start || !end || timeToMin(end)<=timeToMin(start)){ toast("End time must be after start time"); return; }
       const subjectId = root.querySelector("#bfSubject").value || null;
       const type = root.querySelector("#bfType").value;
+      const days = Array.from(root.querySelectorAll("#bfDay input:checked")).map(cb=>Number(cb.value));
+      if(!days.length){ toast("Select at least one day"); return; }
       const data = {
-        id: editing?editing.id:uid(),
         type,
         title: root.querySelector("#bfTitle").value.trim(),
         description: root.querySelector("#bfDesc").value.trim(),
-        day: Number(root.querySelector("#bfDay").value),
         start, end, subjectId,
         recurring: root.querySelector("#bfRecurring").checked
       };
@@ -364,8 +363,15 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
         data.studyTopics = topics ? topics.split(",").map(s=>s.trim()).filter(Boolean) : [];
         data.studyProgress = 0;
       }
-      if(editing) Object.assign(editing, data);
-      else state.timetable.push(makeBlock(data));
+      if(editing){
+        editing.day = days[0];
+        Object.assign(editing, data);
+        for(let i=1;i<days.length;i++){
+          state.timetable.push(makeBlock({...data,id:uid(),day:days[i],todoistId:null}));
+        }
+      } else {
+        days.forEach(day=>state.timetable.push(makeBlock({...data,id:uid(),day})));
+      }
       save(); closePopover(); renderTimetable();
     });
   });
