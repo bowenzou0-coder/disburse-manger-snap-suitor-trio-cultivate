@@ -418,6 +418,7 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       if(type==="task") todoistSync();
     });
   });
+}
 
 /* ===================== templates ===================== */
 function openTemplatesModal(){
