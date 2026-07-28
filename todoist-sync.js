@@ -146,13 +146,6 @@ async function todoistPush(){
     }
   }
 
-  // Timetable tasks
-  for (const block of state.timetable) {
-    if(block.type==="task" && block.title && block.title.trim()){
-      taskPromises.push(pushTimetableTask(block, existingTasksByName, touchedTaskIds));
-    }
-  }
-
   // Execute all pushes
   let completed = 0;
   const totalTasks = taskPromises.length;
@@ -230,72 +223,6 @@ async function todoistPushTask(t, cat, existingTasksByName, touchedTaskIds){
   }
 }
 
-async function pushTimetableTasks(existingTasksByName, touchedTaskIds){
-  if(!todoistToken) return [];
-  const blocks = state.timetable.filter(b=> b.type==="task" && b.title && b.title.trim());
-  if(!blocks.length) return [];
-  return blocks.map(b => pushTimetableTask(b, existingTasksByName, touchedTaskIds));
-}
-
-async function pushTimetableTask(block, existingTasksByName, touchedTaskIds){
-  if(!block.todoistId){
-    const existing = existingTasksByName.get(block.title.toLowerCase());
-    if (existing) {
-      block.todoistId = existing.id;
-      todoistMap.tasks[existing.id] = { type: "timetable", blockId: block.id };
-      touchedTaskIds.add(existing.id);
-      const body = { content: block.title, description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}` };
-      if(block.recurring) body.due_string = `every ${DAYS[block.day]} at ${block.start}`;
-      else { const d=getDueDateForBlock(block); if(d) body.due_date = d; }
-      await todoistFetch("/tasks/" + existing.id, { method:"POST", body:JSON.stringify(body) });
-    } else {
-      const body = {
-        content: block.title,
-        description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`
-      };
-      if(block.recurring) body.due_string = `every ${DAYS[block.day]} at ${block.start}`;
-      else { const d=getDueDateForBlock(block); if(d) body.due_date = d; }
-      const td = await todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) });
-      block.todoistId = td.id;
-      todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
-      touchedTaskIds.add(td.id);
-    }
-  } else {
-    try {
-      touchedTaskIds.add(block.todoistId);
-      const body = { content: block.title, description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}` };
-      if(block.recurring) body.due_string = `every ${DAYS[block.day]} at ${block.start}`;
-      else { const d=getDueDateForBlock(block); if(d) body.due_date = d; }
-      await todoistFetch("/tasks/"+block.todoistId, { method:"POST", body:JSON.stringify(body) });
-    } catch (e) {
-      if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
-        const oldId = block.todoistId;
-        block.todoistId = null;
-        delete todoistMap.tasks[oldId];
-        await pushTimetableTask(block, existingTasksByName, touchedTaskIds);
-      } else {
-        throw e;
-      }
-    }
-  }
-}
-
-function getDueDateForBlock(block){
-  const today = new Date();
-  const todayDow = today.getDay();
-  const blockDow = block.day + 1;
-  let daysUntil = blockDow - todayDow;
-  if(daysUntil < 0) daysUntil += 7;
-  if(daysUntil === 0){
-    const nowMin = today.getHours()*60 + today.getMinutes();
-    const startMin = timeToMin(block.start);
-    if(nowMin > startMin) daysUntil = 7;
-  }
-  const dueDate = new Date(today);
-  dueDate.setDate(today.getDate() + daysUntil);
-  return isoDate(dueDate);
-}
-
 // ─── COMPLETIONS ─────────────────────────────────────────────────────────────
 
 async function todoistPushCompletions(){
@@ -317,22 +244,6 @@ async function todoistPushCompletions(){
           delete todoistMap.completed[key];
         }catch(e){}
       }
-    }
-  }
-  for(const block of state.timetable){
-    if(block.type!=="task" || !block.todoistId) continue;
-    const done = block.completed;
-    const key = block.todoistId+"_"+todayISO();
-    if(done && !todoistMap.completed[key]){
-      try{
-        await todoistFetch("/tasks/"+block.todoistId+"/close", { method:"POST" });
-        todoistMap.completed[key] = true;
-      }catch(e){}
-    } else if(!done && todoistMap.completed[key]){
-      try{
-        await todoistFetch("/tasks/"+block.todoistId+"/reopen", { method:"POST" });
-        delete todoistMap.completed[key];
-      }catch(e){}
     }
   }
   saveTodoistMap();
@@ -452,6 +363,8 @@ async function todoistPull(){
         existing.task.done = true;
         existing.task.completedAt = todayISO();
         changed = true;
+        const block = state.timetable.find(b=>b.id===existing.task.timetableBlockId);
+        if(block){ block.completed=true; block.completedAt=todayISO(); }
       }
     }
   });

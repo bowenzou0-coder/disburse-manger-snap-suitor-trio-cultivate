@@ -102,6 +102,14 @@ function minToTimeLabel(mins){
 }
 function fmtHM(mins){ const h=Math.floor(mins/60), m=mins%60; return h>0? `${h}h ${m}m` : `${m}m`; }
 function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function getNextDateForDay(day, start){
+  const today = new Date(), todayDow = today.getDay(), blockDow = day + 1;
+  let d = blockDow - todayDow;
+  if(d < 0) d += 7;
+  if(d === 0 && timeToMin(start) < today.getHours()*60+today.getMinutes()) d = 7;
+  const dt = new Date(today); dt.setDate(today.getDate()+d);
+  return isoDate(dt);
+}
 function subjectById(id){ return state.subjects.find(s=>s.id===id); }
 function nextPaletteColor(){
   const used = state.subjects.map(s=>s.color);

@@ -98,10 +98,10 @@ function renderTimetable(){
       if(block && block.type==="task"){
         block.completed = !block.completed;
         block.completedAt = block.completed ? todayISO() : null;
+        const linked = state.tasks[0]?.tasks?.find(t=>t.timetableBlockId===block.id);
+        if(linked){ linked.done=block.completed; linked.completedAt=block.completedAt; }
         save(); renderTimetable();
-        if(block.todoistId){
-          todoistSync();
-        }
+        if(linked) todoistSync();
       }
     }));
   document.getElementById("ttGrid").querySelectorAll("[data-add-day]").forEach(el=>
@@ -256,8 +256,10 @@ function renderTimetableMobile(){
         if(block && block.type==="task"){
           block.completed = !block.completed;
           block.completedAt = block.completed ? todayISO() : null;
+          const linked = state.tasks[0]?.tasks?.find(t=>t.timetableBlockId===block.id);
+          if(linked){ linked.done=block.completed; linked.completedAt=block.completedAt; }
           save(); renderTimetable();
-          if(block.todoistId) todoistSync();
+          if(linked) todoistSync();
         }
       }));
   }
@@ -332,11 +334,14 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
 
     root.querySelector("#bfCancel").addEventListener("click", closePopover);
     if(editing) root.querySelector("#bfDelete").addEventListener("click", ()=>{
-      if(editing.todoistId && confirm("This will also delete the Todoist task. Continue?")){
+      const linkedTask = state.tasks[0]?.tasks?.find(t=>t.timetableBlockId===editing.id);
+      if(linkedTask?.todoistId && confirm("This will also delete the Todoist task. Continue?")){
         state.timetable = state.timetable.filter(b=>b.id!==editing.id);
+        state.tasks[0].tasks = state.tasks[0].tasks.filter(t=>t.id!==linkedTask.id);
         save(); closePopover(); renderTimetable();
-      } else if(!editing.todoistId) {
+      } else {
         state.timetable = state.timetable.filter(b=>b.id!==editing.id);
+        if(linkedTask) state.tasks[0].tasks = state.tasks[0].tasks.filter(t=>t.id!==linkedTask.id);
         save(); closePopover(); renderTimetable();
       }
     });
@@ -368,14 +373,46 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       if(conflicts.length){
         toast("Time conflict on "+conflicts.map(d=>DAYS[d]).join(", ")); return;
       }
+
+      function upsertChecklistTask(blockId, day, recurring){
+        if(type!=="task") return;
+        if(!state.tasks.length) state.tasks.push({id:uid(),name:"Timetable",color:PALETTE[0],tasks:[],groups:[]});
+        const cat = state.tasks[0];
+        const existing = (cat.tasks||[]).find(t=>t.timetableBlockId===blockId);
+        const due = getNextDateForDay(day, start);
+        if(existing){
+          existing.title=data.title;
+          existing.description=data.description||"";
+          existing.due=due;
+          existing.repeat=recurring?"weekly":null;
+          existing.repeatDays=recurring?[day]:[];
+        } else {
+          cat.tasks.push(makeTask({
+            title:data.title,
+            description:data.description||"",
+            due,
+            timetableBlockId:blockId,
+            repeat:recurring?"weekly":null,
+            repeatDays:recurring?[day]:[]
+          }));
+        }
+      }
+
       if(editing){
-        editing.day = days[0];
-        Object.assign(editing, data);
+        editing.day=days[0];
+        Object.assign(editing,data);
+        upsertChecklistTask(editing.id, editing.day, editing.recurring);
         for(let i=1;i<days.length;i++){
-          state.timetable.push(makeBlock({...data,id:uid(),day:days[i],todoistId:null}));
+          const id=uid();
+          state.timetable.push(makeBlock({...data,id,day:days[i],todoistId:null}));
+          upsertChecklistTask(id, days[i], data.recurring);
         }
       } else {
-        days.forEach(day=>state.timetable.push(makeBlock({...data,id:uid(),day})));
+        days.forEach(day=>{
+          const id=uid();
+          state.timetable.push(makeBlock({...data,id,day}));
+          upsertChecklistTask(id, day, data.recurring);
+        });
       }
       save(); closePopover(); renderTimetable();
     });
