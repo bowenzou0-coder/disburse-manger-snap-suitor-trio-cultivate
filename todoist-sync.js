@@ -244,18 +244,17 @@ async function pushTimetableTask(block, existingTasksByName, touchedTaskIds){
       block.todoistId = existing.id;
       todoistMap.tasks[existing.id] = { type: "timetable", blockId: block.id };
       touchedTaskIds.add(existing.id);
-      const body = { content: block.title };
-      const dueDate = getDueDateForBlock(block);
-      if(dueDate) body.due_date = dueDate;
-      body.description = `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`;
+      const body = { content: block.title, description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}` };
+      if(block.recurring) body.due_string = `every ${DAYS[block.day]} at ${block.start}`;
+      else { const d=getDueDateForBlock(block); if(d) body.due_date = d; }
       await todoistFetch("/tasks/" + existing.id, { method:"POST", body:JSON.stringify(body) });
     } else {
       const body = {
         content: block.title,
         description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`
       };
-      const dueDate = getDueDateForBlock(block);
-      if(dueDate) body.due_date = dueDate;
+      if(block.recurring) body.due_string = `every ${DAYS[block.day]} at ${block.start}`;
+      else { const d=getDueDateForBlock(block); if(d) body.due_date = d; }
       const td = await todoistFetch("/tasks", { method:"POST", body:JSON.stringify(body) });
       block.todoistId = td.id;
       todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };
@@ -264,10 +263,9 @@ async function pushTimetableTask(block, existingTasksByName, touchedTaskIds){
   } else {
     try {
       touchedTaskIds.add(block.todoistId);
-      const body = { content: block.title };
-      const dueDate = getDueDateForBlock(block);
-      if(dueDate) body.due_date = dueDate;
-      body.description = `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}`;
+      const body = { content: block.title, description: `[Timetable ${DAYS[block.day]} ${block.start}-${block.end}] ${block.description || ""}` };
+      if(block.recurring) body.due_string = `every ${DAYS[block.day]} at ${block.start}`;
+      else { const d=getDueDateForBlock(block); if(d) body.due_date = d; }
       await todoistFetch("/tasks/"+block.todoistId, { method:"POST", body:JSON.stringify(body) });
     } catch (e) {
       if (e.message === "NOT_FOUND" || e.message.includes("Network error")) {
@@ -385,6 +383,7 @@ async function todoistPull(){
             block.title = td.content;
             block.completed = false;
             block.completedAt = null;
+            block.recurring = td.due && td.due.is_recurring;
             if(td.due && td.due.date) block.due = td.due.date;
             changed = true;
           }
@@ -481,6 +480,7 @@ function parseAndCreateTimetableBlock(td){
   );
   if(existing){
     existing.todoistId = td.id;
+    existing.recurring = td.due && td.due.is_recurring;
     todoistMap.tasks[td.id] = { type: "timetable", blockId: existing.id };
     return;
   }
@@ -489,11 +489,10 @@ function parseAndCreateTimetableBlock(td){
     type: "task",
     title: td.content,
     description: desc.replace(/\[Timetable[^\]]+\]\s*/, ""),
-    day,
-    start,
-    end,
+    day, start, end,
     todoistId: td.id,
-    completed: false
+    completed: false,
+    recurring: td.due && td.due.is_recurring
   });
   state.timetable.push(block);
   todoistMap.tasks[td.id] = { type: "timetable", blockId: block.id };

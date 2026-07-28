@@ -317,13 +317,7 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
     // Type-specific fields
     const typeFields = root.querySelector("#bfTypeFields");
     function renderTypeFields(type){
-      if(type==="task"){
-        typeFields.innerHTML = `
-          <label class="field" style="flex-direction:row; align-items:center; gap:8px;">
-            <input type="checkbox" id="bfTodoistSync" ${editing&&editing.todoistId?'checked':''}> Sync to Todoist
-            <span style="font-size:11px; color:var(--text-faint);">Creates/updates a Todoist task</span>
-          </label>`;
-      } else if(type==="study"){
+      if(type==="study"){
         typeFields.innerHTML = `
           <label class="field">
             <textarea class="input" id="bfStudyTopics" rows="2" placeholder="Topics to cover (comma-separated)...">${editing&&editing.studyTopics?editing.studyTopics.join(", "):''}</textarea>
@@ -360,11 +354,6 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
         start, end, subjectId,
         recurring: root.querySelector("#bfRecurring").checked
       };
-      if(type==="task"){
-        data.todoistId = root.querySelector("#bfTodoistSync")?.checked ? (editing?.todoistId||null) : null;
-      } else {
-        data.todoistId = null;
-      }
       if(type==="study"){
         const topics = root.querySelector("#bfStudyTopics")?.value;
         data.studyTopics = topics ? topics.split(",").map(s=>s.trim()).filter(Boolean) : [];
