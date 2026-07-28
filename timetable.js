@@ -363,6 +363,15 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
         data.studyTopics = topics ? topics.split(",").map(s=>s.trim()).filter(Boolean) : [];
         data.studyProgress = 0;
       }
+      const conflicts = days.filter(day =>
+        state.timetable.some(b =>
+          b.day===day && b.id!==(editing&&editing.id) &&
+          timeToMin(b.start) < timeToMin(end) && timeToMin(b.end) > timeToMin(start)
+        )
+      );
+      if(conflicts.length){
+        toast("Time conflict on "+conflicts.map(d=>DAYS[d]).join(", ")); return;
+      }
       if(editing){
         editing.day = days[0];
         Object.assign(editing, data);
