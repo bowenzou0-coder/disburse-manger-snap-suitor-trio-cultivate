@@ -279,8 +279,8 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       <div class="input" id="bfDay" style="flex-wrap:wrap; gap:6px; padding:8px;"></div>
     </label>
     <div class="row">
-      <label class="field">Start<div style="display:flex; gap:4px; align-items:center;"><input class="input" type="text" inputmode="numeric" id="bfStartH" value="${editing?editing.start.slice(0,2):(prefillStart||'09:00').slice(0,2)}" placeholder="HH" maxlength="2" style="width:44px; text-align:center;">:<input class="input" type="text" inputmode="numeric" id="bfStartM" value="${editing?editing.start.slice(3):(prefillStart||'09:00').slice(3)}" placeholder="MM" maxlength="2" style="width:44px; text-align:center;"></div></label>
-      <label class="field">End<div style="display:flex; gap:4px; align-items:center;"><input class="input" type="text" inputmode="numeric" id="bfEndH" value="${editing?editing.end.slice(0,2):(prefillEnd||'10:00').slice(0,2)}" placeholder="HH" maxlength="2" style="width:44px; text-align:center;">:<input class="input" type="text" inputmode="numeric" id="bfEndM" value="${editing?editing.end.slice(3):(prefillEnd||'10:00').slice(3)}" placeholder="MM" maxlength="2" style="width:44px; text-align:center;"></div></label>
+      <label class="field">Start<input class="input" type="text" inputmode="numeric" id="bfStart" value="${editing?editing.start.replace(":",""):(prefillStart||'09:00').replace(":","")}" placeholder="0930" maxlength="4" style="font-family:var(--mono);"></label>
+      <label class="field">End<input class="input" type="text" inputmode="numeric" id="bfEnd" value="${editing?editing.end.replace(":",""):(prefillEnd||'10:00').replace(":","")}" placeholder="1030" maxlength="4" style="font-family:var(--mono);"></label>
     </div>
     <label class="field">Subject
       <div class="input" id="bfSubject"></div>
@@ -308,9 +308,9 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       const detected = autoDetectSubject(e.target.value);
       if(detected) initSelect(root.querySelector("#bfSubject"), subjOpts, detected.id);
     });
-    ["bfStartH","bfStartM","bfEndH","bfEndM"].forEach(id=>{
+    ["bfStart","bfEnd"].forEach(id=>{
       root.querySelector("#"+id).addEventListener("input", function(){
-        this.value=this.value.replace(/\D/g,"").slice(0,2);
+        this.value=this.value.replace(/\D/g,"").slice(0,4);
       });
     });
 
@@ -344,8 +344,10 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       }
     });
     root.querySelector("#bfSave").addEventListener("click", ()=>{
-      const start = (root.querySelector("#bfStartH").value||"00").padStart(2,"0")+":"+(root.querySelector("#bfStartM").value||"00").padStart(2,"0");
-      const end = (root.querySelector("#bfEndH").value||"00").padStart(2,"0")+":"+(root.querySelector("#bfEndM").value||"00").padStart(2,"0");
+      const startRaw = root.querySelector("#bfStart").value.replace(/\D/g,"").slice(0,4).padStart(4,"0");
+      const endRaw = root.querySelector("#bfEnd").value.replace(/\D/g,"").slice(0,4).padStart(4,"0");
+      const start = startRaw.slice(0,2)+":"+startRaw.slice(2);
+      const end = endRaw.slice(0,2)+":"+endRaw.slice(2);
       if(!start || !end || timeToMin(end)<=timeToMin(start)){ toast("End time must be after start time"); return; }
       const subjectId = root.querySelector("#bfSubject").value || null;
       const type = root.querySelector("#bfType").value;
