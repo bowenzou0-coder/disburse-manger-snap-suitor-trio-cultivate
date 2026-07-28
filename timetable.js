@@ -415,9 +415,9 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
         });
       }
       save(); closePopover(); renderTimetable();
+      if(type==="task") todoistSync();
     });
   });
-}
 
 /* ===================== templates ===================== */
 function openTemplatesModal(){

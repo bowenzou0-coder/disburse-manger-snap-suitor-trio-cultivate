@@ -353,6 +353,7 @@ async function todoistPull(){
       if(block && !block.completed){
         block.completed = true;
         block.completedAt = todayISO();
+        if(!block.recurring) state.timetable = state.timetable.filter(b=>b.id!==block.id);
         changed = true;
       }
     } else {
@@ -364,7 +365,7 @@ async function todoistPull(){
         existing.task.completedAt = todayISO();
         changed = true;
         const block = state.timetable.find(b=>b.id===existing.task.timetableBlockId);
-        if(block){ block.completed=true; block.completedAt=todayISO(); }
+        if(block){ block.completed=true; block.completedAt=todayISO(); if(!block.recurring) state.timetable=state.timetable.filter(b=>b.id!==block.id); }
       }
     }
   });

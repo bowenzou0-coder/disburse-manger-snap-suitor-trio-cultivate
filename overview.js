@@ -156,7 +156,12 @@ function toggleTask(catId, groupId, taskId){
   const arr = groupId ? (cat.groups.find(g=>g.id===groupId)||{}).tasks : cat.tasks;
   if(!arr) return;
   const t = arr.find(x=>x.id===taskId); if(!t) return;
-  setTaskDoneToday(t, !taskDoneToday(t));
+  const wasDone = taskDoneToday(t);
+  setTaskDoneToday(t, !wasDone);
+  if(!wasDone && t.timetableBlockId){
+    const block = state.timetable.find(b=>b.id===t.timetableBlockId);
+    if(block && !block.recurring) state.timetable = state.timetable.filter(b=>b.id!==block.id);
+  }
   save();
   renderStreakChip();
 }
