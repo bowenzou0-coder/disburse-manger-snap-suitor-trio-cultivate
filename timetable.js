@@ -306,6 +306,13 @@ function openBlockModal(blockId, prefillDay, anchor, prefillStart, prefillEnd){
       const detected = autoDetectSubject(e.target.value);
       if(detected) initSelect(root.querySelector("#bfSubject"), subjOpts, detected.id);
     });
+    ["bfStart","bfEnd"].forEach(id=>{
+      root.querySelector("#"+id).addEventListener("input", function(){
+        let v=this.value.replace(/\D/g,"").slice(0,4);
+        if(v.length>=2) v=v.slice(0,2)+":"+v.slice(2);
+        this.value=v;
+      });
+    });
 
     // Type-specific fields
     const typeFields = root.querySelector("#bfTypeFields");
